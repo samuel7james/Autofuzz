@@ -39,5 +39,23 @@ docker run -d --name autofuzz-ftp-container -p 21:21 -p 30000-30009:30000-30009 
 ```bash
 python3 autofuzz.py
 ```
----
 Execute this command to start the fuzzing process. The script will mutate FTP commands, send them to the server, and track any crashes or restarts that occur. It will also log the results for further analysis.
+
+---
+
+## 📄 Paper Reference
+
+This repository supports the research paper:
+
+> Samuel James and Annup Kumar. *A Comprehensive Framework for Automated Network Protocol Fuzzing and Security Analysis*. 2025.
+
+### BibTeX:
+
+```bibtex
+@misc{james2025fuzzing,
+  author       = {Samuel James and Annup Kumar},
+  title        = {A Comprehensive Framework for Automated Network Protocol Fuzzing and Security Analysis},
+  year         = 2025,
+  howpublished = {\url{https://github.com/samuel7james/Autofuzz}},
+  note         = {Accessed: 2025-XX-XX}
+}
