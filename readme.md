@@ -32,12 +32,12 @@ AutoFuzz is a CLI-based, FSM-guided fuzzing framework designed for automated tes
 cd docker/
 docker build -t autofuzz-ftp .
 docker run -d --name autofuzz-ftp-container -p 21:21 -p 30000-30009:30000-30009 autofuzz-ftp
+```
 
 ### 2. Run The Fuzzer
 
 ```bash
 python3 autofuzz.py
-
+```
 ---
-
 Execute this command to start the fuzzing process. The script will mutate FTP commands, send them to the server, and track any crashes or restarts that occur. It will also log the results for further analysis.
