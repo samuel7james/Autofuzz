@@ -57,5 +57,4 @@ This repository supports the research paper:
   title        = {A Comprehensive Framework for Automated Network Protocol Fuzzing and Security Analysis},
   year         = 2025,
   howpublished = {\url{https://github.com/samuel7james/Autofuzz}},
-  note         = {Accessed: 2025-XX-XX}
 }
