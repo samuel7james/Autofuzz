@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv/
+venv/
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+
+# AutoFuzz runtime artifacts
+.autofuzz/
+scans/
+mutated_inputs/
+fuzz_log.txt
+fuzz_results.csv
+restart_log.txt
+
+# Editors
+.vscode/
+.idea/

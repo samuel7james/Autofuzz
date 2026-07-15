@@ -1,0 +1,1 @@
+"""AutoFuzz command-line interface."""

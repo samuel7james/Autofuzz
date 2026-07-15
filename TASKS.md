@@ -1,0 +1,168 @@
+# AutoFuzz v2.0 — Task Tracker
+
+Status legend: `[ ]` pending · `[~]` in progress · `[x]` done · `[!]` blocked
+
+This file is updated continuously as phases are implemented. See
+`PROJECT_PLAN.md` for the architecture and rationale behind each phase.
+**No phase begins until the previous one is reviewed and approved**, and
+implementation does not start on any phase until this roadmap itself is
+approved.
+
+---
+
+## Phase 0 — Audit (complete)
+
+- [x] Inventory repository contents
+- [x] Read and understand `autofuzz.py` end-to-end
+- [x] Read Docker lab (`docker/Dockerfile`, `docker/vsftpd.conf`)
+- [x] Identify strengths to preserve
+- [x] Identify weaknesses/technical debt
+- [x] Resolve v1-vs-master-prompt identity conflict with user (→ dual-engine: protocol fuzzing + web assessment)
+- [x] Write `PROJECT_PLAN.md`
+- [x] Write `TASKS.md`
+- [ ] **Await roadmap approval before starting Phase 2**
+
+---
+
+## Phase 2 — Foundation (complete, pending user review)
+
+- [x] Create `pyproject.toml` (hatchling backend, `autofuzz` console script)
+- [x] Establish `src/autofuzz/` package layout per `PROJECT_PLAN.md` §7 (core + cli fully implemented; protocol_fuzzing/web/plugins/reporting/utils are placeholder packages for Phases 3–6)
+- [x] `core/config.py`: pydantic `ScanProfile`/`SchedulerConfig`/`WebEngineConfig`/`ProtocolEngineConfig` + YAML profile loader (`load_profile`)
+- [x] `core/logging.py`: structlog-based structured + console logging (`configure_logging`, `get_logger`)
+- [x] `core/errors.py`: exception hierarchy (`AutoFuzzError` + 5 subclasses; replaces bare `except:`)
+- [x] CLI skeleton (`cli/app.py`): Typer root app, `--version`, `--help`, `web`/`proto` stub commands, `--verbose`/`--quiet`
+- [x] Implicit engine dispatch: `autofuzz <target>` auto-inserts `web` (URL) or `proto` (anything else) before Click parses argv — verified end-to-end with the installed console script
+- [x] Relocate v1 root `autofuzz.py` → `legacy/autofuzz_v1.py` (content unchanged; done *during* this phase, not deferred — it was actively colliding with the new `autofuzz` package on `sys.path` and blocking `pytest` collection, so the swap couldn't wait for Phase 5's full logic migration). `readme.md` updated to point at the new path with a note.
+- [x] Move `docker/Dockerfile` + `docker/vsftpd.conf` → `docker/labs/ftp-vsftpd/`; `readme.md` build path updated to match
+- [x] Baseline `tests/` (16 tests): CLI smoke tests + implicit-dispatch unit tests, config/profile loading + validation, logging setup
+- [x] Add `.gitignore` (Python/venv/tooling caches/AutoFuzz runtime artifacts)
+- [x] Full-repo self-review before marking phase complete (see verification results below)
+
+**Verification run this phase** (`.venv`, Python 3.13.2):
+- `ruff check` — all checks passed
+- `ruff format --check` — 21 files already formatted
+- `mypy --strict` (on `autofuzz.core`, `autofuzz.cli`) — no issues
+- `pytest` — 16 passed
+- `coverage` — 92% on implemented modules (100% on `core/`)
+- `python -m build --wheel` — builds cleanly
+- Manual CLI smoke test: `autofuzz --version`, `autofuzz --help`, `autofuzz https://target.example` (dispatches to the `web` stub as designed)
+
+**Deviation from the original checklist:** v1's relocation moved up from "during Phase 5" to "during Phase 2" — see note above. Its logic is still fully intact and unported; Phase 5 still does the real migration into `protocol_fuzzing/`.
+
+## Phase 3 — Core Engine
+
+- [ ] `core/scheduler.py`: asyncio worker pool with configurable concurrency
+- [ ] Rate limiter (token bucket) integrated into scheduler
+- [ ] Retry policy (exponential backoff, max attempts, configurable per profile)
+- [ ] `core/scan.py`: `ScanSession` lifecycle (`created → running → paused → completed/failed`) with persistence
+- [ ] Resume support: reload a `ScanSession` from disk and continue
+- [ ] `core/target_controller.py`: `TargetController` interface (`is_alive()`, `recover()`) + Docker implementation (generalized `restart_docker()`), default no-op implementation
+- [ ] Config profiles: default/thorough/lab presets, override via CLI flags
+- [ ] Unit tests for scheduler, retry, rate limiter, scan lifecycle
+
+## Phase 4 — Discovery Engine
+
+- [ ] `web/http_client.py`: async `httpx`-based client wrapper (timeouts, TLS opts, header management)
+- [ ] `web/crawler.py`: link-following crawler with scope/depth limits
+- [ ] `discovery/sitemap.py`: sitemap.xml discovery + parsing
+- [ ] `discovery/robots.py`: robots.txt parsing (disallowed paths as discovery hints)
+- [ ] `discovery/endpoints.py`: endpoint enumeration from crawl results
+- [ ] `discovery/params.py`: parameter discovery from URLs/forms
+- [ ] `discovery/fingerprint.py`: technology fingerprinting (headers, common file signatures)
+- [ ] Request graph model (nodes = endpoints, edges = discovered-via links)
+- [ ] Integration tests against a local static test server
+
+## Phase 5 — Assessment Framework
+
+- [ ] `plugins/base.py`: shared `Plugin` + `Finding` contracts (used by both engines)
+- [ ] `core/plugin.py`: plugin registry/loader (discovery via entry points or package scan)
+- [ ] Port v1 mutation corpus into `protocol_fuzzing/mutators/` as discrete, documented, unit-tested mutators
+- [ ] `protocol_fuzzing/fsm.py`: generalized FSM/sequence builder (replaces hardcoded `BASE_SEQUENCE`)
+- [ ] `protocol_fuzzing/adapters/ftp.py`: FTP transport adapter (v1 successor, async)
+- [ ] `protocol_fuzzing/crash_classifier.py`: distinguishes real faults from timeouts/protocol rejections (replaces "any exception = crash")
+- [ ] Built-in web plugins: passive header analysis, metadata/response inspection, protocol-level checks (non-intrusive only, per plan §12)
+- [ ] Plugin configuration (enable/disable, per-plugin options via profile)
+- [ ] Tests for plugin registry + at least one plugin per engine
+
+## Phase 6 — Reporting
+
+- [ ] `reporting/models.py`: `Finding`, `RiskScore`, `ScanReport` dataclasses
+- [ ] `reporting/renderers/html.py` (Jinja2 template: executive summary, findings, evidence, stats, timeline, recommendations)
+- [ ] `reporting/renderers/markdown.py`
+- [ ] `reporting/renderers/json.py`
+- [ ] `reporting/renderers/csv.py`
+- [ ] Streaming result writes during a scan (fixes v1's "lose everything on mid-run crash")
+- [ ] Risk scoring model
+- [ ] Tests for each renderer against a fixture `ScanReport`
+
+## Phase 7 — UX & CLI
+
+- [ ] Rich progress bars for both engines' scan loops
+- [ ] Colored console output (severity-based)
+- [ ] `autofuzz resume <scan-id>`
+- [ ] `autofuzz history` (list past scans)
+- [ ] Interactive mode (prompt for target/profile when none given)
+- [ ] Config profile management commands
+- [ ] Actionable error messages (replace stack-trace-only failures)
+- [ ] Logging verbosity flags (`-v`/`-vv`/`--quiet`)
+
+## Phase 8 — Performance
+
+- [ ] Concurrency tuning + safe defaults (avoid accidental target overload)
+- [ ] Memory profiling under large crawls / long fuzzing runs
+- [ ] CPU profiling of mutation/hot loops
+- [ ] Response caching within a scan session (discovery phase)
+- [ ] Startup time check (CLI cold start)
+- [ ] Benchmark harness + published comparison vs. v1 baseline
+
+## Phase 9 — DevSecOps
+
+- [ ] `.github/workflows/ci.yml`: ruff check + format check, mypy, pytest+coverage, build
+- [ ] `.github/workflows/codeql.yml`
+- [ ] Semgrep integration
+- [ ] `pip-audit` dependency scanning
+- [ ] Trivy Docker image scanning
+- [ ] Enable GitHub secret scanning + push protection (repo setting, not code)
+- [ ] SBOM generation (CycloneDX via syft) on release
+- [ ] `.github/workflows/release.yml`: tag-triggered build + changelog + SBOM + GitHub Release
+
+## Phase 10 — Infrastructure
+
+- [ ] `docker/Dockerfile` (multi-stage, app image)
+- [ ] `docker/docker-compose.yml` (app + `labs/ftp-vsftpd`, easy local dev)
+- [ ] Environment/config management docs (`.env.example`)
+- [ ] Example deployment configuration
+- [ ] Secure-by-default configuration handling review
+
+## Phase 11 — Documentation
+
+- [ ] `README.md` rewrite (v2 quickstart, both engines, authorized-use notice)
+- [ ] `docs/architecture.md`
+- [ ] `docs/developer-guide.md` (how to add a plugin/mutator/adapter)
+- [ ] `docs/user-guide.md`
+- [ ] `docs/ethics.md` (authorized-use policy)
+- [ ] `CONTRIBUTING.md`
+- [ ] `CHANGELOG.md`
+- [ ] Example configs in `examples/configs/`
+- [ ] Verify docs match implementation (no drift)
+
+## Phase 12 — Final Engineering Review
+
+- [ ] Full dead-code sweep
+- [ ] Naming/consistency pass across both engines
+- [ ] Documentation accuracy pass
+- [ ] Full test suite + coverage report
+- [ ] Build verification (clean install from sdist/wheel)
+- [ ] Report generation verification (all 4 formats, both engines)
+- [ ] Confirm every phase's checklist above is fully checked
+- [ ] Final summary for user
+
+---
+
+## Notes / Open Decisions
+
+- Ruff proposed as the single lint+format tool (replacing Black) — flagged
+  in `PROJECT_PLAN.md` §8 for confirmation, not yet decided.
+- PyPI publishing is out of scope unless requested — release workflow
+  produces GitHub Releases only by default.
