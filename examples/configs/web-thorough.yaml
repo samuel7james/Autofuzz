@@ -1,0 +1,25 @@
+# AutoFuzz scan profile — Web Assessment Engine, thorough/deep settings.
+#
+# Wider and deeper crawl than web-default.yaml, with a slightly lower
+# request rate and more retries so a long-running scan doesn't overwhelm
+# the target or bail out on transient errors.
+#
+# IMPORTANT: `authorized` must be true for a scan to run. Only set it to
+# true after confirming you have explicit, documented authorization to
+# test the target you point this profile at.
+name: web-thorough
+engine: web
+authorized: false
+
+scheduler:
+  concurrency: 20
+  rate_limit_per_second: 15.0
+  max_retries: 3
+  retry_backoff_seconds: 1.5
+  request_timeout_seconds: 15.0
+
+web:
+  max_crawl_depth: 8
+  max_pages: 5000
+  follow_redirects: true
+  respect_robots_txt: true

@@ -50,16 +50,26 @@ approved.
 
 **Deviation from the original checklist:** v1's relocation moved up from "during Phase 5" to "during Phase 2" — see note above. Its logic is still fully intact and unported; Phase 5 still does the real migration into `protocol_fuzzing/`.
 
-## Phase 3 — Core Engine
+## Phase 3 — Core Engine (complete, pending user review)
 
-- [ ] `core/scheduler.py`: asyncio worker pool with configurable concurrency
-- [ ] Rate limiter (token bucket) integrated into scheduler
-- [ ] Retry policy (exponential backoff, max attempts, configurable per profile)
-- [ ] `core/scan.py`: `ScanSession` lifecycle (`created → running → paused → completed/failed`) with persistence
-- [ ] Resume support: reload a `ScanSession` from disk and continue
-- [ ] `core/target_controller.py`: `TargetController` interface (`is_alive()`, `recover()`) + Docker implementation (generalized `restart_docker()`), default no-op implementation
-- [ ] Config profiles: default/thorough/lab presets, override via CLI flags
-- [ ] Unit tests for scheduler, retry, rate limiter, scan lifecycle
+- [x] `core/scheduler.py`: `WorkerPool` — asyncio worker pool with configurable concurrency (`asyncio.Semaphore`)
+- [x] `RateLimiter`: token-bucket rate limiter integrated into `WorkerPool`
+- [x] `RetryPolicy`: exponential backoff + jitter, `max_retries`/`retry_backoff_seconds` sourced from `SchedulerConfig`; per-attempt timeout via `request_timeout_seconds`
+- [x] `core/scan.py`: `ScanSession` lifecycle (`created → running → paused → completed/failed`) as an explicit state machine (invalid transitions raise `EngineError`), with JSON persistence (`save`/`load`)
+- [x] Resume support: `ScanSession.resume(directory, scan_id)` reloads from disk and moves `paused/created → running`
+- [x] `core/target_controller.py`: `TargetController` `Protocol` (`is_alive()`, `recover()`); `DockerTargetController` generalizes v1's `restart_docker()` (any container name, async subprocess, `docker inspect`-based liveness); `NoOpTargetController` is the default (always alive, recovery logs a warning and takes no action)
+- [x] Config profiles: `examples/configs/web-default.yaml`, `web-thorough.yaml`, `ftp-lab.yaml` — all ship with `authorized: false` except `ftp-lab.yaml` (points only at the tool's own disposable lab container)
+- [x] CLI wiring: `autofuzz web/proto --profile <path>` loads and validates the profile, checks it matches the invoked engine, and enforces the `authorized: true` gate before proceeding (still a stub past that point — Phase 4/5 land the engines)
+- [x] Unit tests: scheduler (pool concurrency/ordering/exception handling, retry policy, rate limiter), scan lifecycle (transitions, persistence round-trip, resume, invalid-state errors), target controller (both implementations, mocked subprocess), CLI profile/authorization gate (valid, unauthorized, mismatched-engine, missing-file cases)
+
+**Verification run this phase** (same `.venv`):
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` (`autofuzz.core`, `autofuzz.cli`) — no issues
+- `pytest` — 40/40 passing, 97% coverage
+- `python -m build --wheel` — builds cleanly
+- Manual smoke test: `autofuzz proto 127.0.0.1:21 --profile examples/configs/ftp-lab.yaml` (loads, authorized, proceeds to stub) vs. `autofuzz web https://target.example --profile examples/configs/web-default.yaml` (correctly rejected: `authorized: false`)
+
+**Note:** found and fixed a non-ASCII (em dash) character in a user-facing CLI error message that rendered as `�` on a Windows console codepage — replaced with a plain period.
 
 ## Phase 4 — Discovery Engine
 

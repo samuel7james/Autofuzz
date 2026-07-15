@@ -17,7 +17,9 @@ from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
-from autofuzz.cli.ui import console
+from autofuzz.cli.ui import console, print_error
+from autofuzz.core.config import ScanProfile, load_profile
+from autofuzz.core.errors import ConfigError
 from autofuzz.core.logging import configure_logging, get_logger
 
 log = get_logger(__name__)
@@ -77,25 +79,56 @@ def main(
     configure_logging(level=level)
 
 
+def _load_and_authorize(profile_path: str, expected_engine: str) -> ScanProfile:
+    """Load a YAML profile, confirm it targets the invoked engine, and enforce
+    the authorization gate. Exits the CLI with code 2 on any failure — never
+    silently falls through to running a scan."""
+    try:
+        profile = load_profile(profile_path)
+    except ConfigError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    if profile.engine != expected_engine:
+        print_error(
+            f"Profile '{profile.name}' is for the '{profile.engine}' engine, "
+            f"not '{expected_engine}'."
+        )
+        raise typer.Exit(code=2)
+
+    if not profile.authorized:
+        print_error(
+            f"Profile '{profile.name}' has authorized: false. Set it to true only "
+            "after confirming you are authorized to test this target."
+        )
+        raise typer.Exit(code=2)
+
+    return profile
+
+
 @app.command()
 def web(
     target: str = typer.Argument(..., help="Target URL, e.g. https://target.example"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Path to a YAML profile."),
 ) -> None:
     """Run the Web Assessment Engine against TARGET. (Engine lands in Phase 4.)"""
-    del profile
+    if profile is not None:
+        loaded = _load_and_authorize(profile, expected_engine="web")
+        console.print(f"[green]Loaded profile:[/green] {loaded.name}")
     console.print(f"[yellow]Web Assessment Engine not implemented yet.[/yellow] Target: {target}")
     raise typer.Exit(code=1)
 
 
 @app.command()
 def proto(
-    profile: str = typer.Argument(
-        ..., help="Path to a YAML protocol fuzzing profile, or a host:port target."
-    ),
+    target: str = typer.Argument(..., help="Target as host:port, e.g. 127.0.0.1:21"),
+    profile: str | None = typer.Option(None, "--profile", "-p", help="Path to a YAML profile."),
 ) -> None:
-    """Run the Protocol Fuzzing Engine using PROFILE. (Engine lands in Phase 3/5.)"""
-    console.print(f"[yellow]Protocol Fuzzing Engine not implemented yet.[/yellow] {profile=}")
+    """Run the Protocol Fuzzing Engine against TARGET. (Engine lands in Phase 3/5.)"""
+    if profile is not None:
+        loaded = _load_and_authorize(profile, expected_engine="proto")
+        console.print(f"[green]Loaded profile:[/green] {loaded.name}")
+    console.print(f"[yellow]Protocol Fuzzing Engine not implemented yet.[/yellow] Target: {target}")
     raise typer.Exit(code=1)
 
 

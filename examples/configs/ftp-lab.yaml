@@ -1,0 +1,25 @@
+# AutoFuzz scan profile — Protocol Fuzzing Engine, FTP lab target.
+#
+# Targets the disposable vsftpd lab shipped in docker/labs/ftp-vsftpd/
+# (see readme.md for how to build and run it). `authorized: true` is safe
+# to ship here by default because this profile only ever points at a local
+# container AutoFuzz provisions and controls itself — not a stand-in for
+# authorizing any other target.
+name: ftp-lab
+engine: proto
+authorized: true
+
+scheduler:
+  concurrency: 1
+  rate_limit_per_second: 5.0
+  max_retries: 0
+  retry_backoff_seconds: 0.5
+  request_timeout_seconds: 5.0
+
+protocol:
+  adapter: ftp
+  target_host: 127.0.0.1
+  target_port: 21
+  iterations: 1000
+  target_controller: docker
+  docker_container_name: autofuzz-ftp-container
