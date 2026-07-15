@@ -62,12 +62,22 @@ def _extract_links(base_url: str, html: str) -> list[str]:
     return links
 
 
+CrawlProgressCallback = Callable[[int, int], None]
+"""Called after each depth level with (pages_fetched, max_pages)."""
+
+
 class Crawler:
     """Breadth-first crawl of a single origin, bounded by depth and page count."""
 
-    def __init__(self, web_config: WebEngineConfig, scheduler_config: SchedulerConfig) -> None:
+    def __init__(
+        self,
+        web_config: WebEngineConfig,
+        scheduler_config: SchedulerConfig,
+        on_progress: CrawlProgressCallback | None = None,
+    ) -> None:
         self._web_config = web_config
         self._scheduler_config = scheduler_config
+        self._on_progress = on_progress
 
     async def crawl(self, start_url: str) -> list[CrawlResult]:
         origin = start_url
@@ -101,6 +111,9 @@ class Crawler:
 
                 current_level = next_level
                 depth += 1
+
+                if self._on_progress:
+                    self._on_progress(len(results), self._web_config.max_pages)
 
         return results[: self._web_config.max_pages]
 

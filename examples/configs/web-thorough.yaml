@@ -1,8 +1,10 @@
-# AutoFuzz scan profile — Web Assessment Engine, thorough/deep settings.
+# AutoFuzz scan profile — Web Assessment Engine, thorough/aggressive settings.
 #
-# Wider and deeper crawl than web-default.yaml, with a slightly lower
-# request rate and more retries so a long-running scan doesn't overwhelm
-# the target or bail out on transient errors.
+# Wider, deeper crawl than web-default.yaml, tuned to be more offensive
+# (ignore robots.txt exclusions, don't cap out early) while staying robust
+# against a flaky or slow target (more retries, longer per-request timeout,
+# exponential backoff) so a long-running scan doesn't bail out on
+# transient errors instead of surfacing real findings.
 #
 # IMPORTANT: `authorized` must be true for a scan to run. Only set it to
 # true after confirming you have explicit, documented authorization to
@@ -12,14 +14,21 @@ engine: web
 authorized: true
 
 scheduler:
-  concurrency: 20
-  rate_limit_per_second: 15.0
-  max_retries: 3
+  concurrency: 30
+  rate_limit_per_second: 25.0
+  max_retries: 5
   retry_backoff_seconds: 1.5
-  request_timeout_seconds: 15.0
+  request_timeout_seconds: 20.0
 
 web:
-  max_crawl_depth: 8
-  max_pages: 5000
+  max_crawl_depth: 12
+  max_pages: 10000
   follow_redirects: true
-  respect_robots_txt: true
+  # Assessment intent, not politeness: don't hold back from paths an
+  # operator tried to keep out of search engines (see web-default.yaml
+  # for why this doesn't currently change crawler behavior on its own).
+  respect_robots_txt: false
+
+# enabled: null (default) runs every registered plugin.
+plugins:
+  disabled: []

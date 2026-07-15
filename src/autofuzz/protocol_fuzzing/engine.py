@@ -31,6 +31,11 @@ _FTP_DEFAULT_SEQUENCE = ["USER vulnftp", "PASS 1234", "PWD", "TYPE A", "LIST", "
 
 _DEFAULT_SEQUENCES: dict[str, list[str]] = {"ftp": _FTP_DEFAULT_SEQUENCE}
 
+ProgressCallback = Callable[[int, int, list[Finding]], None]
+"""Called after each chunk with (iterations_completed, total_iterations,
+findings_so_far) - findings_so_far is the full cumulative list, not just
+the new ones, so a caller can checkpoint it directly (e.g. for resume)."""
+
 
 class ProtocolFuzzingEngine:
     """Runs ``protocol_config.iterations`` mutated attempts against a target,
@@ -42,20 +47,27 @@ class ProtocolFuzzingEngine:
         protocol_config: ProtocolEngineConfig,
         scheduler_config: SchedulerConfig,
         target_controller: TargetController | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> None:
         if protocol_config.adapter not in _DEFAULT_SEQUENCES:
             raise EngineError(f"Unsupported protocol adapter: {protocol_config.adapter!r}")
         self._protocol_config = protocol_config
         self._scheduler_config = scheduler_config
         self._target_controller = target_controller or NoOpTargetController()
+        self._on_progress = on_progress
         self._fsm = ProtocolFsm.from_commands(_DEFAULT_SEQUENCES[protocol_config.adapter])
 
-    async def run(self) -> list[Finding]:
+    async def run(self, start_iteration: int = 0) -> list[Finding]:
+        """Run attempts from ``start_iteration`` through ``protocol_config.iterations``.
+
+        ``start_iteration`` lets a caller resume a previously interrupted
+        run without re-fuzzing already-completed iterations.
+        """
         findings: list[Finding] = []
         iterations = self._protocol_config.iterations
         chunk_size = self._scheduler_config.concurrency
 
-        for chunk_start in range(0, iterations, chunk_size):
+        for chunk_start in range(start_iteration, iterations, chunk_size):
             if not await self._target_controller.is_alive():
                 log.warning("target_down_recovering", target=self._target())
                 await self._target_controller.recover()
@@ -71,6 +83,9 @@ class ProtocolFuzzingEngine:
                     continue
                 if result is not None:
                     findings.append(result)
+
+            if self._on_progress:
+                self._on_progress(chunk_start + chunk_len, iterations, findings)
 
         return findings
 

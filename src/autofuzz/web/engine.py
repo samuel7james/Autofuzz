@@ -18,7 +18,7 @@ from autofuzz.plugins.builtin.web_headers import (
     MissingSecurityHeadersPlugin,
     ServerDisclosurePlugin,
 )
-from autofuzz.web.crawler import Crawler, CrawlResult
+from autofuzz.web.crawler import Crawler, CrawlProgressCallback, CrawlResult
 from autofuzz.web.discovery.endpoints import enumerate_endpoints
 from autofuzz.web.discovery.fingerprint import fingerprint
 from autofuzz.web.discovery.params import discover_params
@@ -43,13 +43,15 @@ class WebAssessmentEngine:
         web_config: WebEngineConfig,
         scheduler_config: SchedulerConfig,
         registry: PluginRegistry[CrawlResult] | None = None,
+        on_progress: CrawlProgressCallback | None = None,
     ) -> None:
         self._web_config = web_config
         self._scheduler_config = scheduler_config
         self._registry = registry or default_web_plugin_registry()
+        self._on_progress = on_progress
 
     async def run(self, start_url: str) -> tuple[list[Finding], dict[str, int]]:
-        crawler = Crawler(self._web_config, self._scheduler_config)
+        crawler = Crawler(self._web_config, self._scheduler_config, self._on_progress)
         results = await crawler.crawl(start_url)
 
         findings: list[Finding] = []

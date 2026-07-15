@@ -1,6 +1,8 @@
-"""Unit tests for the shared Plugin/Finding contracts (Phase 5)."""
+"""Unit tests for the shared Plugin/Finding contracts (Phase 5/7)."""
 
 from __future__ import annotations
+
+import json
 
 from autofuzz.plugins.base import Finding, Plugin, PluginMetadata, Severity
 
@@ -59,3 +61,37 @@ def test_plugin_applies_to_and_run() -> None:
     findings = plugin.run("target")
     assert len(findings) == 1
     assert findings[0].target == "target"
+
+
+def test_finding_to_dict_is_json_serializable() -> None:
+    finding = Finding(
+        plugin_id="test.x",
+        title="t",
+        severity=Severity.CRITICAL,
+        description="d",
+        target="x",
+        metadata={"count": 3},
+    )
+
+    data = finding.to_dict()
+    encoded = json.dumps(data)  # must not raise
+
+    assert data["severity"] == "critical"
+    assert json.loads(encoded)["metadata"] == {"count": 3}
+
+
+def test_finding_from_dict_round_trips() -> None:
+    original = Finding(
+        plugin_id="test.x",
+        title="t",
+        severity=Severity.MEDIUM,
+        description="d",
+        target="x",
+        evidence="ev",
+        metadata={"a": 1},
+    )
+
+    restored = Finding.from_dict(original.to_dict())
+
+    assert restored == original
+    assert restored.severity is Severity.MEDIUM

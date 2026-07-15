@@ -5,21 +5,26 @@
 # to ship here by default because this profile only ever points at a local
 # container AutoFuzz provisions and controls itself — not a stand-in for
 # authorizing any other target.
+#
+# Tuned more offensive than a single-connection loop (concurrent attempts,
+# more iterations) while staying robust against the lab container being
+# momentarily busy (a small retry allowance, a longer per-attempt timeout)
+# so a slow response doesn't get misclassified as a crash.
 name: ftp-lab
 engine: proto
 authorized: true
 
 scheduler:
-  concurrency: 1
-  rate_limit_per_second: 5.0
-  max_retries: 0
+  concurrency: 4
+  rate_limit_per_second: 20.0
+  max_retries: 1
   retry_backoff_seconds: 0.5
-  request_timeout_seconds: 5.0
+  request_timeout_seconds: 8.0
 
 protocol:
   adapter: ftp
   target_host: 127.0.0.1
   target_port: 21
-  iterations: 1000
+  iterations: 3000
   target_controller: docker
   docker_container_name: autofuzz-ftp-container

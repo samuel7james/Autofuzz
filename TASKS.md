@@ -144,16 +144,31 @@ approved.
 - `python -m build --wheel` — builds cleanly; confirmed the Jinja template is actually included in the wheel (`unzip -l` showed `autofuzz/reporting/templates/report.html.jinja`) rather than silently assuming hatchling would package a non-`.py` data file
 - Manual end-to-end smoke test: real local static HTTP server + the actual installed `autofuzz web <url> --profile <profile>` command (not mocked) - crawled 2 pages, found 10 findings (missing security headers + a real server-version disclosure, since Python's `http.server` reports its version in the `Server` header), wrote a valid HTML report to disk, exited 1
 
-## Phase 7 — UX & CLI
+## Phase 7 — UX & CLI (mostly complete, two items carried forward — pending user review)
 
-- [ ] Rich progress bars for both engines' scan loops
-- [ ] Colored console output (severity-based)
-- [ ] `autofuzz resume <scan-id>`
-- [ ] `autofuzz history` (list past scans)
-- [ ] Interactive mode (prompt for target/profile when none given)
-- [ ] Config profile management commands
-- [ ] Actionable error messages (replace stack-trace-only failures)
-- [ ] Logging verbosity flags (`-v`/`-vv`/`--quiet`)
+- [x] Rich progress bars for both engines' scan loops: `Crawler`/`WebAssessmentEngine` report `(pages_fetched, max_pages)` per depth level; `ProtocolFuzzingEngine` reports `(iterations_completed, total, findings_so_far)` per concurrency chunk. Both are plain callback hooks (`on_progress`) on the engines themselves, not a Rich dependency baked into engine code - the CLI is what turns them into a `rich.progress.Progress` bar, keeping engines UI-agnostic and unit-testable without a terminal.
+- [x] Colored console output: `cli/ui.py` adds `severity_tag()` (INFO dim → CRITICAL bold-white-on-red), used everywhere a Finding's severity is printed.
+- [x] `autofuzz resume <scan-id>`: resumes an interrupted **protocol fuzzing** scan from its last checkpoint (`session.progress["iterations_completed"]`/`["findings"]`), continuing rather than re-fuzzing already-completed iterations. Rejects web scans (not supported - see below), already-completed scans, and unknown scan ids.
+- [x] `autofuzz history`: lists recorded scan sessions (id, engine, target, state, finding count, started) from the local session store.
+- [x] Actionable error messages: `cli_main()` now wraps `app()` so any `AutoFuzzError` that escapes a command body (found one real gap: `TargetError` from a failed Docker recovery wasn't caught by the existing narrower `except EngineError` blocks) prints a clean message and exits 2 instead of a raw traceback; `KeyboardInterrupt` exits quietly (130).
+- [x] Logging verbosity flags: `-v`/`--quiet` already existed (Phase 2); unchanged, still sufficient (`-v` → DEBUG, `--quiet` → ERROR).
+
+**Foundation work this required (not itself on the original checklist):**
+- `core/scan.py`: `ScanSession` gained a `target` field (it only stored the profile before, which for web scans never captured the actual URL) and `start()` now allows resuming from `RUNNING`/`FAILED`, not just `CREATED`/`PAUSED` - a session left `RUNNING` almost always means the process that owned it died mid-scan, which is exactly the case `resume` exists for.
+- `plugins/base.py`: `Finding.to_dict()`/`from_dict()`, so progress checkpoints and `resume` can round-trip findings through JSON without duplicating that logic ad hoc in the CLI.
+- Every `web`/`proto`/`resume` invocation now creates and checkpoints a `ScanSession` under `AutoFuzzSettings().config_dir / "scans"` (`~/.autofuzz/scans/` by default) - this also closes most of Phase 6's carried-forward "streaming writes" gap for protocol fuzzing specifically: progress and findings-so-far are persisted after every concurrency chunk, not only at the end. (Web scans still only checkpoint page count, not partial findings - crawl state itself isn't resumable yet, see below.)
+
+**Not done in this phase (carried forward):**
+- Interactive mode (prompt for target/profile when none given) and config profile management commands (`autofuzz config ...`) - lower priority than getting resume/history working end-to-end; no design started yet.
+- **Web-scan resume.** `autofuzz resume` explicitly rejects web scans with a clear message rather than pretending to support it. Protocol fuzzing resume just needs an iteration counter; a crawl's actual state (visited-URL set, BFS frontier) isn't serialized anywhere, so resuming one properly needs real design work, not a quick extension of the proto path.
+
+**Verification run this phase** (same `.venv`):
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` — 43 source files, no issues (no new packages needed adding to scope this phase)
+- `pytest` — 204/204 passing, 96% coverage, including a dedicated test for `cli_main()`'s global error wrapper (`CliRunner` calls `app` directly and never exercises that wrapper, so it needed its own test invoking `cli_main()`)
+- `python -m build --wheel` — builds cleanly
+- **Critical fix applied before it became a real bug**: initial CLI tests would have written real scan-session files into the actual `~/.autofuzz/scans/` on every test run. Added an autouse fixture setting `AUTOFUZZ_CONFIG_DIR` per test (already-supported via `AutoFuzzSettings`' env-var prefix, just never previously exercised) and confirmed after a full run that no `~/.autofuzz` directory was created.
+- Manual end-to-end smoke test: real fake-FTP server + the actual installed CLI (not `CliRunner`) - `autofuzz proto` showed a live progress bar and colored findings, `autofuzz history` listed the completed scan in a real terminal, `autofuzz resume` correctly rejected it as already-completed. Noted one minor, non-blocking cosmetic issue: Rich's history table truncates long values (target, timestamp) on a narrow/cp1252 terminal - the underlying session data is intact, only the table display truncates.
 
 ## Phase 8 — Performance
 

@@ -33,10 +33,11 @@ def _now() -> str:
 
 @dataclass
 class ScanSession:
-    """Tracks one scan's identity, profile, state, and progress for resume."""
+    """Tracks one scan's identity, profile, target, state, and progress for resume."""
 
     id: str
     profile: ScanProfile
+    target: str = ""
     state: ScanState = ScanState.CREATED
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
@@ -44,8 +45,8 @@ class ScanSession:
     error: str | None = None
 
     @classmethod
-    def create(cls, profile: ScanProfile) -> ScanSession:
-        return cls(id=uuid.uuid4().hex[:12], profile=profile)
+    def create(cls, profile: ScanProfile, target: str = "") -> ScanSession:
+        return cls(id=uuid.uuid4().hex[:12], profile=profile, target=target)
 
     def _transition(self, new_state: ScanState, *, allowed_from: set[ScanState]) -> None:
         if self.state not in allowed_from:
@@ -56,7 +57,19 @@ class ScanSession:
         self.updated_at = _now()
 
     def start(self) -> None:
-        self._transition(ScanState.RUNNING, allowed_from={ScanState.CREATED, ScanState.PAUSED})
+        """Move to RUNNING. Allowed from CREATED/PAUSED (normal start/resume) and
+        from RUNNING/FAILED too - a session left RUNNING or FAILED usually means the
+        process that owned it died or was killed mid-scan, and resuming that is
+        exactly what `autofuzz resume` is for."""
+        self._transition(
+            ScanState.RUNNING,
+            allowed_from={
+                ScanState.CREATED,
+                ScanState.PAUSED,
+                ScanState.RUNNING,
+                ScanState.FAILED,
+            },
+        )
 
     def pause(self) -> None:
         self._transition(ScanState.PAUSED, allowed_from={ScanState.RUNNING})
@@ -82,6 +95,7 @@ class ScanSession:
         return cls(
             id=data["id"],
             profile=ScanProfile.model_validate(data["profile"]),
+            target=data.get("target", ""),
             state=ScanState(data["state"]),
             created_at=data["created_at"],
             updated_at=data["updated_at"],

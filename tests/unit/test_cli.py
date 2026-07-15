@@ -1,11 +1,14 @@
 """Smoke tests for the CLI skeleton (Phase 2), profile/authorization gate
-(Phase 3), the wired Protocol Fuzzing Engine (Phase 5), and the wired Web
-Assessment Engine + reporting (Phase 6).
+(Phase 3), the wired Protocol Fuzzing Engine (Phase 5), the wired Web
+Assessment Engine + reporting (Phase 6), and scan sessions/history/resume
+(Phase 7).
 
 Every invocation that reaches report-writing passes --report-output
 pointing into tmp_path - both `web` and `proto` write a report file by
 default, and without an explicit path that would write into the real
-working directory (littering the repo whenever the suite runs).
+working directory (littering the repo whenever the suite runs). The
+autouse `_isolated_config_dir` fixture below does the same for scan
+sessions, which otherwise default to the real `~/.autofuzz/scans/`.
 """
 
 from __future__ import annotations
@@ -23,6 +26,13 @@ from autofuzz.plugins.base import Finding, Severity
 runner = CliRunner()
 
 
+@pytest.fixture(autouse=True)
+def _isolated_config_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Point AutoFuzzSettings.config_dir at a per-test tmp directory so scan
+    sessions never touch the real ~/.autofuzz/ during a test run."""
+    monkeypatch.setenv("AUTOFUZZ_CONFIG_DIR", str(tmp_path / ".autofuzz-test"))
+
+
 def test_version() -> None:
     result = runner.invoke(app, ["--version"])
     assert result.exit_code == 0
@@ -34,6 +44,8 @@ def test_help_lists_subcommands() -> None:
     assert result.exit_code == 0
     assert "web" in result.stdout
     assert "proto" in result.stdout
+    assert "history" in result.stdout
+    assert "resume" in result.stdout
 
 
 def test_web_requires_profile() -> None:
@@ -232,13 +244,13 @@ class _FakeEngine:
     """Stands in for ProtocolFuzzingEngine so CLI tests never touch the network."""
 
     last_args: tuple[Any, ...] | None = None
-    findings: list[Finding] = []
+    new_findings: list[Finding] = []
 
     def __init__(self, *args: Any) -> None:
         type(self).last_args = args
 
-    async def run(self) -> list[Finding]:
-        return type(self).findings
+    async def run(self, start_iteration: int = 0) -> list[Finding]:
+        return type(self).new_findings
 
 
 def _write_proto_profile(tmp_path: Path, **overrides: object) -> Path:
@@ -272,7 +284,7 @@ def test_proto_runs_engine_and_reports_no_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
-    _FakeEngine.findings = []
+    _FakeEngine.new_findings = []
     profile_path = _write_proto_profile(tmp_path)
 
     result = runner.invoke(
@@ -288,7 +300,7 @@ def test_proto_runs_engine_and_reports_findings(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
-    _FakeEngine.findings = [
+    _FakeEngine.new_findings = [
         Finding(
             plugin_id="protocol-fuzzing.crash-classifier",
             title="Target crashed",
@@ -311,7 +323,7 @@ def test_proto_runs_engine_and_reports_findings(
 
 def test_proto_warns_on_target_mismatch(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
-    _FakeEngine.findings = []
+    _FakeEngine.new_findings = []
     profile_path = _write_proto_profile(tmp_path)
 
     result = runner.invoke(
@@ -348,7 +360,7 @@ def test_proto_docker_controller_without_container_name_is_rejected(
 
 def test_proto_report_written_as_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
-    _FakeEngine.findings = [
+    _FakeEngine.new_findings = [
         Finding(
             plugin_id="protocol-fuzzing.crash-classifier",
             title="Target crashed",
@@ -377,3 +389,179 @@ def test_proto_report_written_as_csv(tmp_path: Path, monkeypatch: pytest.MonkeyP
     assert result.exit_code == 1
     content = report_path.read_text(encoding="utf-8")
     assert "Target crashed" in content
+
+
+def test_proto_creates_a_scan_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
+    _FakeEngine.new_findings = []
+    profile_path = _write_proto_profile(tmp_path)
+
+    runner.invoke(
+        app,
+        ["proto", "127.0.0.1:21", "--profile", str(profile_path), *_report_args(tmp_path)],
+    )
+
+    sessions = list(cli_app._sessions_dir().glob("*.json"))
+    assert len(sessions) == 1
+
+
+def test_history_reports_no_sessions_initially() -> None:
+    result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0
+    assert "No scan history yet." in result.output
+
+
+def test_history_lists_a_completed_scan(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
+    _FakeEngine.new_findings = []
+    profile_path = _write_proto_profile(tmp_path)
+    runner.invoke(
+        app,
+        ["proto", "127.0.0.1:21", "--profile", str(profile_path), *_report_args(tmp_path)],
+    )
+
+    result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0
+    assert "proto" in result.output
+    assert "completed" in result.output
+
+
+def test_resume_unknown_scan_id_is_rejected() -> None:
+    result = runner.invoke(app, ["resume", "does-not-exist"])
+
+    assert result.exit_code == 2
+    assert "not found" in result.output
+
+
+def test_resume_web_scan_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(cli_app, "WebAssessmentEngine", _FakeWebEngine)
+    _FakeWebEngine.findings = []
+    _FakeWebEngine.stats = {}
+    profile_path = _write_profile(tmp_path)
+    runner.invoke(
+        app,
+        ["web", "https://target.example", "--profile", str(profile_path), *_report_args(tmp_path)],
+    )
+    scan_id = next(cli_app._sessions_dir().glob("*.json")).stem
+
+    result = runner.invoke(app, ["resume", scan_id])
+
+    assert result.exit_code == 2
+    assert "web scan" in result.output
+
+
+def test_resume_continues_from_last_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
+    profile_path = _write_proto_profile(
+        tmp_path,
+        protocol={"target_host": "127.0.0.1", "target_port": 21, "iterations": 10},
+    )
+
+    # Simulate an interrupted first run: engine "completes" 4 of 10
+    # iterations with one finding, but the process dies before the CLI
+    # marks the session complete (so it's left in the RUNNING state).
+    class _InterruptedEngine(_FakeEngine):
+        async def run(self, start_iteration: int = 0) -> list[Finding]:
+            assert start_iteration == 0
+            raise RuntimeError("simulated crash mid-scan")
+
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _InterruptedEngine)
+    result = runner.invoke(
+        app,
+        ["proto", "127.0.0.1:21", "--profile", str(profile_path), *_report_args(tmp_path)],
+    )
+    assert result.exit_code != 0  # the simulated crash propagates
+    scan_id = next(cli_app._sessions_dir().glob("*.json")).stem
+
+    # Manually checkpoint progress the way the real on_progress callback
+    # would have, to simulate "died after completing iterations 0-3".
+    session = cli_app.ScanSession.load(cli_app._sessions_dir() / f"{scan_id}.json")
+    session.progress["iterations_completed"] = 4
+    session.progress["findings"] = [
+        Finding(
+            plugin_id="protocol-fuzzing.crash-classifier",
+            title="First crash",
+            severity=Severity.HIGH,
+            description="d",
+            target="127.0.0.1:21",
+        ).to_dict()
+    ]
+    session.save(cli_app._sessions_dir())
+
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
+    _FakeEngine.new_findings = [
+        Finding(
+            plugin_id="protocol-fuzzing.crash-classifier",
+            title="Second crash",
+            severity=Severity.HIGH,
+            description="d",
+            target="127.0.0.1:21",
+        )
+    ]
+
+    result = runner.invoke(app, ["resume", scan_id, *_report_args(tmp_path)])
+
+    assert result.exit_code == 1
+    assert "from iteration 4/10" in result.output
+    assert "Findings: 2" in result.output  # 1 prior + 1 new
+    assert _FakeEngine.last_args is not None
+    assert _FakeEngine.last_args[0].target_host == "127.0.0.1"
+
+
+def test_resume_already_completed_scan_is_rejected(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli_app, "ProtocolFuzzingEngine", _FakeEngine)
+    _FakeEngine.new_findings = []
+    profile_path = _write_proto_profile(tmp_path)
+    runner.invoke(
+        app,
+        ["proto", "127.0.0.1:21", "--profile", str(profile_path), *_report_args(tmp_path)],
+    )
+    scan_id = next(cli_app._sessions_dir().glob("*.json")).stem
+
+    result = runner.invoke(app, ["resume", scan_id])
+
+    assert result.exit_code == 2
+    assert "already completed" in result.output
+
+
+class TestCliMainGlobalErrorHandling:
+    """`cli_main()` wraps `app()` for a safety net CliRunner never exercises
+    (CliRunner calls `app` directly, bypassing this wrapper entirely)."""
+
+    def test_uncaught_autofuzz_error_exits_2_with_clean_message(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from autofuzz.core.errors import TargetError
+
+        def _raise(*_args: Any, **_kwargs: Any) -> None:
+            raise TargetError("docker restart failed")
+
+        monkeypatch.setattr(cli_app, "app", _raise)
+        monkeypatch.setattr("sys.argv", ["autofuzz", "web", "https://x"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli_app.cli_main()
+
+        assert exc_info.value.code == 2
+        assert "docker restart failed" in capsys.readouterr().err
+
+    def test_keyboard_interrupt_exits_130(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        def _raise(*_args: Any, **_kwargs: Any) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr(cli_app, "app", _raise)
+        monkeypatch.setattr("sys.argv", ["autofuzz", "proto", "1.2.3.4:21"])
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli_app.cli_main()
+
+        assert exc_info.value.code == 130
+        assert "Interrupted" in capsys.readouterr().out

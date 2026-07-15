@@ -35,6 +35,22 @@ async def test_crawler_stays_in_scope_and_follows_links(static_site: str) -> Non
     assert not any("external.example" in u for u in urls)
 
 
+async def test_crawler_reports_progress_per_level(static_site: str) -> None:
+    web_config, scheduler_config = _configs()
+    progress_calls: list[tuple[int, int]] = []
+
+    def on_progress(pages_fetched: int, max_pages: int) -> None:
+        progress_calls.append((pages_fetched, max_pages))
+
+    crawler = Crawler(web_config, scheduler_config, on_progress)
+    results = await crawler.crawl(f"{static_site}/index.html")
+
+    assert progress_calls  # at least one level completed
+    assert progress_calls[-1] == (len(results), web_config.max_pages)
+    # Pages-fetched should be non-decreasing across levels.
+    assert [c[0] for c in progress_calls] == sorted(c[0] for c in progress_calls)
+
+
 async def test_crawler_respects_max_pages(static_site: str) -> None:
     web_config = WebEngineConfig(max_crawl_depth=3, max_pages=1)
     scheduler_config = SchedulerConfig(concurrency=5, rate_limit_per_second=1000, max_retries=0)

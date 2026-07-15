@@ -16,7 +16,7 @@ every plugin trivially unit-testable as a pure function of its context.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Generic, TypeVar
@@ -42,6 +42,16 @@ class Finding:
     evidence: str = ""
     metadata: dict[str, Any] = field(default_factory=dict)
     discovered_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON-safe plain dict (severity as its string value)."""
+        data = asdict(self)
+        data["severity"] = self.severity.value
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> Finding:
+        return cls(**{**data, "severity": Severity(data["severity"])})
 
 
 @dataclass(frozen=True, slots=True)

@@ -8,14 +8,25 @@ engine: web
 authorized: true
 
 scheduler:
-  concurrency: 10
+  concurrency: 15
   rate_limit_per_second: 20.0
-  max_retries: 2
+  max_retries: 3
   retry_backoff_seconds: 1.0
-  request_timeout_seconds: 10.0
+  request_timeout_seconds: 15.0
 
 web:
-  max_crawl_depth: 3
-  max_pages: 500
+  max_crawl_depth: 4
+  max_pages: 750
   follow_redirects: true
-  respect_robots_txt: true
+  # For an authorized assessment, paths an operator tried to keep out of
+  # search engines via robots.txt are often exactly what's worth
+  # enumerating - the crawler doesn't enforce exclusions from this flag
+  # either way (see web/discovery/robots.py), but it's set false here to
+  # reflect assessment intent rather than politeness-crawler defaults.
+  respect_robots_txt: false
+
+# enabled: null (default) runs every registered plugin - missing security
+# headers, insecure cookies, server version disclosure, and technology
+# fingerprinting all stay active unless explicitly disabled below.
+plugins:
+  disabled: []

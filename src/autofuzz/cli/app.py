@@ -6,25 +6,30 @@ engine to dispatch to (a URL implies ``web``; anything else implies
 ``proto``) by rewriting argv *before* Click/Typer parses it, so normal
 subcommand parsing is never affected.
 
-Both ``web`` and ``proto`` run their real engines and write a scan report
-(HTML by default; ``--report-format``/``--report-output`` to change that).
+Both ``web`` and ``proto`` run their real engines, show a live progress
+bar, checkpoint a ``ScanSession`` as they go (so ``autofuzz history`` can
+list the run and ``autofuzz resume`` can continue an interrupted protocol
+fuzzing scan), and write a scan report (HTML by default;
+``--report-format``/``--report-output`` to change that).
 """
 
 from __future__ import annotations
 
 import asyncio
 import sys
-import uuid
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import typer
+from rich.progress import Progress
+from rich.table import Table
 
-from autofuzz.cli.ui import console, print_error, print_warning
-from autofuzz.core.config import ScanProfile, load_profile
-from autofuzz.core.errors import ConfigError, EngineError
+from autofuzz.cli.ui import console, print_error, print_warning, severity_tag
+from autofuzz.core.config import AutoFuzzSettings, ScanProfile, load_profile
+from autofuzz.core.errors import AutoFuzzError, ConfigError, EngineError
 from autofuzz.core.logging import configure_logging, get_logger
 from autofuzz.core.plugin import PluginRegistry
+from autofuzz.core.scan import ScanSession, ScanState
 from autofuzz.core.target_controller import (
     DockerTargetController,
     NoOpTargetController,
@@ -45,7 +50,7 @@ app = typer.Typer(
     add_completion=False,
 )
 
-_KNOWN_COMMANDS = {"web", "proto"}
+_KNOWN_COMMANDS = {"web", "proto", "history", "resume"}
 
 
 def _inject_implicit_command(argv: list[str]) -> list[str]:
@@ -93,6 +98,10 @@ def main(
     configure_logging(level=level)
 
 
+def _sessions_dir() -> Path:
+    return AutoFuzzSettings().config_dir / "scans"
+
+
 def _load_and_authorize(profile_path: str, expected_engine: str) -> ScanProfile:
     """Load a YAML profile, confirm it targets the invoked engine, and enforce
     the authorization gate. Exits the CLI with code 2 on any failure — never
@@ -121,10 +130,16 @@ def _load_and_authorize(profile_path: str, expected_engine: str) -> ScanProfile:
 
 
 def _build_report(
-    *, engine: str, target: str, profile_name: str, findings: list[Finding], stats: dict[str, int]
+    *,
+    scan_id: str,
+    engine: str,
+    target: str,
+    profile_name: str,
+    findings: list[Finding],
+    stats: dict[str, int],
 ) -> ScanReport:
     report = ScanReport.create(
-        scan_id=uuid.uuid4().hex[:12], engine=engine, target=target, profile_name=profile_name
+        scan_id=scan_id, engine=engine, target=target, profile_name=profile_name
     )
     report.findings = findings
     report.stats = stats
@@ -135,7 +150,7 @@ def _build_report(
 def _print_summary(report: ScanReport) -> None:
     console.print(f"Findings: {len(report.findings)}  |  Risk score: {report.risk.score}")
     for finding in report.findings:
-        console.print(f"  [{finding.severity.value.upper()}] {finding.title}")
+        console.print(f"  {severity_tag(finding.severity)} {finding.title}")
 
 
 def _write_report_file(report: ScanReport, fmt: ReportFormat, output: str | None) -> Path:
@@ -143,6 +158,64 @@ def _write_report_file(report: ScanReport, fmt: ReportFormat, output: str | None
     path = Path(output) if output else Path(default_name)
     path.write_text(render_report(report, fmt), encoding="utf-8")
     return path
+
+
+def _build_target_controller(profile: ScanProfile) -> TargetController:
+    if profile.protocol.target_controller != "docker":
+        return NoOpTargetController()
+    if not profile.protocol.docker_container_name:
+        print_error("protocol.target_controller is 'docker' but docker_container_name is not set.")
+        raise typer.Exit(code=2)
+    return DockerTargetController(profile.protocol.docker_container_name)
+
+
+def _run_web_engine(
+    profile: ScanProfile, target: str, session: ScanSession
+) -> tuple[list[Finding], dict[str, int]]:
+    registry: PluginRegistry[CrawlResult] = default_web_plugin_registry()
+    registry.configure(enabled_ids=profile.plugins.enabled, disabled_ids=profile.plugins.disabled)
+    registry.apply_options(profile.plugins.options)
+
+    with Progress(console=console) as progress_bar:
+        task = progress_bar.add_task("Crawling", total=profile.web.max_pages)
+
+        def on_progress(completed: int, total: int) -> None:
+            progress_bar.update(task, completed=completed, total=total)
+            session.progress["pages_crawled"] = completed
+            session.save(_sessions_dir())
+
+        engine = WebAssessmentEngine(profile.web, profile.scheduler, registry, on_progress)
+        return asyncio.run(engine.run(target))
+
+
+def _run_proto_engine(
+    profile: ScanProfile,
+    target_controller: TargetController,
+    session: ScanSession,
+    *,
+    start_iteration: int = 0,
+    prior_findings: list[Finding] | None = None,
+    progress_label: str = "Fuzzing",
+) -> list[Finding]:
+    prior = prior_findings or []
+    total = profile.protocol.iterations
+
+    with Progress(console=console) as progress_bar:
+        task = progress_bar.add_task(progress_label, total=total, completed=start_iteration)
+
+        def on_progress(completed: int, _total: int, findings_so_far: list[Finding]) -> None:
+            progress_bar.update(task, completed=completed)
+            combined = prior + findings_so_far
+            session.progress["iterations_completed"] = completed
+            session.progress["findings"] = [f.to_dict() for f in combined]
+            session.save(_sessions_dir())
+
+        engine = ProtocolFuzzingEngine(
+            profile.protocol, profile.scheduler, target_controller, on_progress
+        )
+        new_findings = asyncio.run(engine.run(start_iteration=start_iteration))
+
+    return prior + new_findings
 
 
 _REPORT_FORMAT_OPTION = typer.Option(
@@ -167,30 +240,33 @@ def web(
     loaded = _load_and_authorize(profile, expected_engine="web")
     console.print(f"[green]Loaded profile:[/green] {loaded.name}")
 
-    registry: PluginRegistry[CrawlResult] = default_web_plugin_registry()
-    registry.configure(enabled_ids=loaded.plugins.enabled, disabled_ids=loaded.plugins.disabled)
-    registry.apply_options(loaded.plugins.options)
+    session = ScanSession.create(loaded, target=target)
+    session.start()
+    session.save(_sessions_dir())
 
-    engine = WebAssessmentEngine(loaded.web, loaded.scheduler, registry)
-    findings, stats = asyncio.run(engine.run(target))
+    try:
+        findings, stats = _run_web_engine(loaded, target, session)
+    except Exception as exc:
+        session.fail(str(exc))
+        session.save(_sessions_dir())
+        raise
+
+    session.complete()
+    session.save(_sessions_dir())
 
     report = _build_report(
-        engine="web", target=target, profile_name=loaded.name, findings=findings, stats=stats
+        scan_id=session.id,
+        engine="web",
+        target=target,
+        profile_name=loaded.name,
+        findings=findings,
+        stats=stats,
     )
     _print_summary(report)
     output_path = _write_report_file(report, report_format, report_output)
     console.print(f"Report written to {output_path}")
 
     raise typer.Exit(code=1 if findings else 0)
-
-
-def _build_target_controller(loaded: ScanProfile) -> TargetController:
-    if loaded.protocol.target_controller != "docker":
-        return NoOpTargetController()
-    if not loaded.protocol.docker_container_name:
-        print_error("protocol.target_controller is 'docker' but docker_container_name is not set.")
-        raise typer.Exit(code=2)
-    return DockerTargetController(loaded.protocol.docker_container_name)
 
 
 @app.command()
@@ -212,15 +288,23 @@ def proto(
         )
 
     target_controller = _build_target_controller(loaded)
-    engine = ProtocolFuzzingEngine(loaded.protocol, loaded.scheduler, target_controller)
+
+    session = ScanSession.create(loaded, target=expected_target)
+    session.start()
+    session.save(_sessions_dir())
 
     try:
-        findings = asyncio.run(engine.run())
-    except EngineError as exc:
-        print_error(str(exc))
-        raise typer.Exit(code=2) from exc
+        findings = _run_proto_engine(loaded, target_controller, session)
+    except Exception as exc:
+        session.fail(str(exc))
+        session.save(_sessions_dir())
+        raise
+
+    session.complete()
+    session.save(_sessions_dir())
 
     report = _build_report(
+        scan_id=session.id,
         engine="proto",
         target=expected_target,
         profile_name=loaded.name,
@@ -234,10 +318,135 @@ def proto(
     raise typer.Exit(code=1 if findings else 0)
 
 
+@app.command()
+def history(
+    limit: int = typer.Option(20, "--limit", help="Maximum number of scans to show."),
+) -> None:
+    """List past scans recorded in the local session store."""
+    sessions_dir = _sessions_dir()
+    if not sessions_dir.is_dir():
+        console.print("No scan history yet.")
+        return
+
+    session_files = sorted(
+        sessions_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+    )
+    if not session_files:
+        console.print("No scan history yet.")
+        return
+
+    table = Table("Scan ID", "Engine", "Target", "State", "Findings", "Started")
+    for path in session_files[:limit]:
+        try:
+            entry = ScanSession.load(path)
+        except Exception as exc:
+            log.warning("history_session_unreadable", path=str(path), error=str(exc))
+            continue
+        finding_count = len(entry.progress.get("findings", []))
+        table.add_row(
+            entry.id,
+            entry.profile.engine,
+            entry.target or "-",
+            entry.state.value,
+            str(finding_count),
+            entry.created_at,
+        )
+
+    console.print(table)
+
+
+@app.command()
+def resume(
+    scan_id: str = typer.Argument(..., help="Scan ID to resume, from `autofuzz history`."),
+    report_format: ReportFormat = _REPORT_FORMAT_OPTION,
+    report_output: str | None = _REPORT_OUTPUT_OPTION,
+) -> None:
+    """Resume an interrupted protocol-fuzzing scan. Web-scan resume isn't supported yet."""
+    try:
+        session = ScanSession.load(_sessions_dir() / f"{scan_id}.json")
+    except EngineError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    if session.profile.engine != "proto":
+        print_error(
+            f"Resuming web scans isn't supported yet (scan '{scan_id}' is a web scan). "
+            "Start a new scan with `autofuzz web` instead."
+        )
+        raise typer.Exit(code=2)
+
+    if session.state == ScanState.COMPLETED:
+        print_error(f"Scan '{scan_id}' already completed; nothing to resume.")
+        raise typer.Exit(code=2)
+
+    total = session.profile.protocol.iterations
+    start_iteration = int(session.progress.get("iterations_completed", 0))
+    if start_iteration >= total:
+        print_error(f"Scan '{scan_id}' already reached its {total} configured iterations.")
+        raise typer.Exit(code=2)
+
+    prior_findings = [Finding.from_dict(d) for d in session.progress.get("findings", [])]
+    console.print(
+        f"[green]Resuming scan {scan_id}[/green] from iteration {start_iteration}/{total} "
+        f"({len(prior_findings)} finding(s) so far)."
+    )
+
+    target_controller = _build_target_controller(session.profile)
+
+    session.start()
+    session.save(_sessions_dir())
+
+    try:
+        findings = _run_proto_engine(
+            session.profile,
+            target_controller,
+            session,
+            start_iteration=start_iteration,
+            prior_findings=prior_findings,
+            progress_label="Resuming fuzzing",
+        )
+    except Exception as exc:
+        session.fail(str(exc))
+        session.save(_sessions_dir())
+        raise
+
+    session.complete()
+    session.save(_sessions_dir())
+
+    expected_target = (
+        f"{session.profile.protocol.target_host}:{session.profile.protocol.target_port}"
+    )
+    report = _build_report(
+        scan_id=session.id,
+        engine="proto",
+        target=expected_target,
+        profile_name=session.profile.name,
+        findings=findings,
+        stats={"iterations": total},
+    )
+    _print_summary(report)
+    output_path = _write_report_file(report, report_format, report_output)
+    console.print(f"Report written to {output_path}")
+
+    raise typer.Exit(code=1 if findings else 0)
+
+
 def cli_main() -> None:
-    """Console-script entry point (registered in pyproject.toml)."""
+    """Console-script entry point (registered in pyproject.toml).
+
+    Wraps the whole app so an AutoFuzzError that escapes a command body
+    (e.g. a Docker recovery failure mid-scan) still prints a clean message
+    instead of a raw traceback, and Ctrl-C exits quietly.
+    """
     sys.argv = [sys.argv[0], *_inject_implicit_command(sys.argv[1:])]
-    app()
+    try:
+        app()
+    except AutoFuzzError as exc:
+        print_error(str(exc))
+        sys.exit(2)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Interrupted.[/yellow]")
+        sys.exit(130)
 
 
 if __name__ == "__main__":

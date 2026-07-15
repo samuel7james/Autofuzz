@@ -153,3 +153,50 @@ async def test_engine_recovers_a_down_target_before_continuing(
 
     assert controller.recover_calls == 1
     assert len(findings) == 1
+
+
+async def test_engine_reports_progress_per_chunk(fake_ftp_server: tuple[str, int]) -> None:
+    host, port = fake_ftp_server
+    protocol_config = ProtocolEngineConfig(
+        adapter="ftp", target_host=host, target_port=port, iterations=4
+    )
+    scheduler_config = SchedulerConfig(
+        concurrency=2, rate_limit_per_second=1000, max_retries=0, request_timeout_seconds=2.0
+    )
+    progress_calls: list[tuple[int, int, int]] = []
+
+    def on_progress(completed: int, total: int, findings_so_far: list[object]) -> None:
+        progress_calls.append((completed, total, len(findings_so_far)))
+
+    engine = ProtocolFuzzingEngine(protocol_config, scheduler_config, on_progress=on_progress)
+    findings = await engine.run()
+
+    # 4 iterations at concurrency 2 -> two chunks -> two progress callbacks,
+    # and the findings_so_far passed on the last callback matches the
+    # engine's final return value (it's the cumulative list, not a delta).
+    assert [c[0] for c in progress_calls] == [2, 4]
+    assert [c[1] for c in progress_calls] == [4, 4]
+    assert progress_calls[-1][2] == len(findings)
+
+
+async def test_engine_resumes_from_start_iteration(fake_ftp_server: tuple[str, int]) -> None:
+    host, port = fake_ftp_server
+    protocol_config = ProtocolEngineConfig(
+        adapter="ftp", target_host=host, target_port=port, iterations=4
+    )
+    scheduler_config = SchedulerConfig(
+        concurrency=2, rate_limit_per_second=1000, max_retries=0, request_timeout_seconds=2.0
+    )
+    progress_calls: list[int] = []
+
+    def on_progress(completed: int, _total: int, _findings: list[object]) -> None:
+        progress_calls.append(completed)
+
+    engine = ProtocolFuzzingEngine(protocol_config, scheduler_config, on_progress=on_progress)
+
+    await engine.run(start_iteration=2)
+
+    # Resuming from iteration 2 of 4 should only run the remaining 2
+    # attempts (one chunk), reported as completed=4 - never re-visiting
+    # iterations 0-1.
+    assert progress_calls == [4]
