@@ -71,17 +71,28 @@ approved.
 
 **Note:** found and fixed a non-ASCII (em dash) character in a user-facing CLI error message that rendered as `�` on a Windows console codepage — replaced with a plain period.
 
-## Phase 4 — Discovery Engine
+## Phase 4 — Discovery Engine (complete, pending user review)
 
-- [ ] `web/http_client.py`: async `httpx`-based client wrapper (timeouts, TLS opts, header management)
-- [ ] `web/crawler.py`: link-following crawler with scope/depth limits
-- [ ] `discovery/sitemap.py`: sitemap.xml discovery + parsing
-- [ ] `discovery/robots.py`: robots.txt parsing (disallowed paths as discovery hints)
-- [ ] `discovery/endpoints.py`: endpoint enumeration from crawl results
-- [ ] `discovery/params.py`: parameter discovery from URLs/forms
-- [ ] `discovery/fingerprint.py`: technology fingerprinting (headers, common file signatures)
-- [ ] Request graph model (nodes = endpoints, edges = discovered-via links)
-- [ ] Integration tests against a local static test server
+- [x] `web/http_client.py`: `HttpClient` wraps `httpx.AsyncClient` (timeout, user agent, redirect policy from config; injectable transport for testing)
+- [x] `web/crawler.py`: `Crawler` — breadth-first, level-by-level crawl using `WorkerPool` per level, same-origin scope check, `max_crawl_depth`/`max_pages` enforced, link extraction via BeautifulSoup (`a[href]`, `link[href]`, `script[src]`, `img[src]`)
+- [x] `discovery/sitemap.py`: `parse_sitemap_xml`/`discover_sitemap` — urlset + sitemapindex, via `defusedxml` (not stdlib ElementTree) since sitemap content is untrusted target-supplied input
+- [x] `discovery/robots.py`: `parse_robots_txt`/`discover_robots_txt` — Disallow/Allow/Sitemap as discovery hints; crawler does not auto-enforce exclusions (intentional — see module docstring)
+- [x] `discovery/endpoints.py`: `enumerate_endpoints` — dedupes/sorts successfully fetched crawl results
+- [x] `discovery/params.py`: `discover_params` — query-string params (`parse_qs`) + HTML form fields (`input`/`textarea`/`select`, via BeautifulSoup)
+- [x] `discovery/fingerprint.py`: `fingerprint_response` — rule-based detection from `Server`/`X-Powered-By`/`X-AspNet-Version`/`X-Drupal-Cache` headers and HTML body signatures (WordPress, Django, Laravel, ASP.NET WebForms), deduplicated
+- [x] `discovery/graph.py`: `RequestGraph` — nodes are discovered URLs, edges record which page linked to which; `discovered_via(url)` for reporting/plugins later
+- [x] Integration tests against a real local static HTTP server (`http.server.ThreadingHTTPServer` on an ephemeral port, not mocked) covering the full crawl → endpoints → params → graph → robots → sitemap → fingerprint pipeline
+
+**New dependencies:** `beautifulsoup4` (HTML parsing — regex-based link/form extraction was judged too fragile for a crawler), `defusedxml` (XXE/entity-expansion-safe XML parsing for sitemap content, which is untrusted target input). Both ship type stubs (`types-beautifulsoup4`, `types-defusedxml`) so `mypy --strict` needed no ignore overrides. `autofuzz.web` added to the mypy strict package list.
+
+**Verification run this phase** (same `.venv`):
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` (`autofuzz.core`, `autofuzz.cli`, `autofuzz.web`) — no issues, no overrides needed
+- `pytest` (unit + integration) — 81/81 passing, 96% coverage
+- `python -m build --wheel` — builds cleanly
+- Manual end-to-end smoke test: spun up a real local HTTP server, ran `Crawler.crawl()` against it, confirmed pages/endpoints/params/graph edges all matched expectations
+
+**Not done in this phase (by design, deferred to Phase 5):** the CLI's `autofuzz web <url>` still reports "not implemented yet" — wiring the discovery engine into an actual runnable, reportable scan happens once the plugin/assessment framework and `ScanSession` are connected in Phase 5, not before.
 
 ## Phase 5 — Assessment Framework
 

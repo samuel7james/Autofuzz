@@ -29,6 +29,8 @@ dependencies = [
     "structlog>=24.1",
     "jinja2>=3.1",
     "pyyaml>=6.0",
+    "beautifulsoup4>=4.12",
+    "defusedxml>=0.7",
 ]
 
 [project.optional-dependencies]
@@ -39,6 +41,8 @@ dev = [
     "pytest-asyncio>=0.23",
     "coverage>=7.4",
     "types-pyyaml>=6.0",
+    "types-beautifulsoup4>=4.12",
+    "types-defusedxml>=0.7",
 ]
 
 [project.urls]
@@ -63,7 +67,7 @@ python_version = "3.10"
 strict = true
 mypy_path = "src"
 explicit_package_bases = true
-packages = ["autofuzz.core", "autofuzz.cli"]
+packages = ["autofuzz.core", "autofuzz.cli", "autofuzz.web"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
