@@ -9,7 +9,7 @@
 # test the target you point this profile at.
 name: web-thorough
 engine: web
-authorized: false
+authorized: true
 
 scheduler:
   concurrency: 20

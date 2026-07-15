@@ -5,7 +5,7 @@
 # test the target you point this profile at.
 name: web-default
 engine: web
-authorized: false
+authorized: true
 
 scheduler:
   concurrency: 10
