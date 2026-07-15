@@ -68,6 +68,19 @@ def test_random_byte_flood_length() -> None:
     assert len(result) == len(_INPUT) + 2048
 
 
+def test_random_byte_flood_charset_matches_byte_range() -> None:
+    # Every appended char must be a valid single byte 1-255 (never NUL,
+    # matching the original randint(1, 255) semantics this replaced).
+    suffix = m.random_byte_flood(_INPUT)[len(_INPUT) :]
+    assert all(1 <= ord(c) <= 255 for c in suffix)
+
+
+def test_all_byte_chars_population_is_1_to_255() -> None:
+    assert len(m._ALL_BYTE_CHARS) == 255
+    assert m._ALL_BYTE_CHARS[0] == chr(1)
+    assert m._ALL_BYTE_CHARS[-1] == chr(255)
+
+
 def test_keyword_strip_and_flood_removes_user() -> None:
     result = m.keyword_strip_and_flood("USER vulnftp")
     assert not result.startswith("USER")

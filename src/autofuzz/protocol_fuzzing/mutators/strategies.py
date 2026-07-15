@@ -80,9 +80,18 @@ def format_string_probe(command: str) -> str:
     return "%%s%%x%%n%%p" * 1000
 
 
+_ALL_BYTE_CHARS: list[str] = [chr(i) for i in range(1, 256)]
+
+
 def random_byte_flood(command: str) -> str:
-    """Append 2048 fully random bytes (1-255)."""
-    return command + "".join(chr(random.randint(1, 255)) for _ in range(2048))
+    """Append 2048 fully random bytes (1-255).
+
+    Uses ``random.choices`` over a precomputed population rather than 2048
+    individual ``random.randint`` calls - profiling showed the naive form
+    dominating the entire mutator corpus's CPU time (~75% of it, despite
+    being 1 of 18 strategies) purely from per-call Python overhead.
+    """
+    return command + "".join(random.choices(_ALL_BYTE_CHARS, k=2048))
 
 
 def keyword_strip_and_flood(command: str) -> str:

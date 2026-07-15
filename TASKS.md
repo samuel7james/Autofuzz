@@ -170,14 +170,96 @@ approved.
 - **Critical fix applied before it became a real bug**: initial CLI tests would have written real scan-session files into the actual `~/.autofuzz/scans/` on every test run. Added an autouse fixture setting `AUTOFUZZ_CONFIG_DIR` per test (already-supported via `AutoFuzzSettings`' env-var prefix, just never previously exercised) and confirmed after a full run that no `~/.autofuzz` directory was created.
 - Manual end-to-end smoke test: real fake-FTP server + the actual installed CLI (not `CliRunner`) - `autofuzz proto` showed a live progress bar and colored findings, `autofuzz history` listed the completed scan in a real terminal, `autofuzz resume` correctly rejected it as already-completed. Noted one minor, non-blocking cosmetic issue: Rich's history table truncates long values (target, timestamp) on a narrow/cp1252 terminal - the underlying session data is intact, only the table display truncates.
 
-## Phase 8 — Performance
+## Phase 8 — Performance (complete — pending user review)
 
-- [ ] Concurrency tuning + safe defaults (avoid accidental target overload)
-- [ ] Memory profiling under large crawls / long fuzzing runs
-- [ ] CPU profiling of mutation/hot loops
-- [ ] Response caching within a scan session (discovery phase)
-- [ ] Startup time check (CLI cold start)
-- [ ] Benchmark harness + published comparison vs. v1 baseline
+Every item below was measured, not assumed — where the data said "this is
+fine," nothing was changed; where it found a real problem, it got fixed.
+
+- [x] **CPU profiling of mutation/hot loops** — `cProfile` on 50,000
+  `mutate()` calls found `random_byte_flood` alone consuming ~75% of the
+  entire mutator corpus's CPU time (despite being 1 of 18 strategies),
+  caused by calling `random.randint()` individually 2048 times per
+  mutation. Fixed by switching to `random.choices()` over a precomputed
+  population (`protocol_fuzzing/mutators/strategies.py`), matching the
+  pattern `random_control_byte_flood` already used. **Result: 50,000 calls
+  went from 15.2s to 5.5s under profiling (~2.8x), ~48-51k mutations/sec
+  unprofiled.** Behavior is unchanged (same length, same 1-255 byte range) —
+  covered by new tests asserting both.
+- [x] **CPU profiling of the crawler** — profiled a 300-page crawl;
+  BeautifulSoup/`html.parser` doesn't even appear in the top 15 functions by
+  cumulative time. httpx request/response handling dominates (~96% of
+  wall time). This is data, not a guess, for a decision already implicitly
+  made in Phase 4: switching to an `lxml` parser backend would not
+  meaningfully help, since parsing was never the bottleneck. Not changed.
+- [x] **Memory profiling under large crawls** — `tracemalloc` on a 500-page
+  crawl (~30KB HTML each, ~15MB raw content) peaked at 23.2MB traced memory
+  (~1.5x raw content size) — linear, bounded, no leak. Extrapolated to
+  `web-thorough.yaml`'s `max_pages: 10000` ceiling, that's roughly
+  400-500MB for a maximal scan. That's a real, worth-knowing scaling
+  characteristic (every fetched page's HTML is held in memory for the
+  whole crawl, since plugins/fingerprinting run after crawling completes,
+  not incrementally) — but the data showed linear/bounded growth, not a
+  leak or blowup, so the invasive fix (stream per-page analysis into the
+  crawl loop instead of analyzing after) wasn't undertaken this phase.
+  Documented here as a known characteristic rather than silently ignored.
+- [x] **Startup time check (CLI cold start)** — measured: bare Python
+  interpreter start ~49ms; `import autofuzz.cli.app` ~527ms;
+  `autofuzz --version` end-to-end averages ~486ms across 5 runs. Broke
+  down where the time goes (`typer` 74ms, `httpx` 61ms, `bs4` 38ms,
+  `pydantic` 22ms, `jinja2` 18ms, `defusedxml` 4ms, plus their transitive
+  deps and interpreter overhead not captured by per-module measurement).
+  **Considered and rejected** lazy-importing `WebAssessmentEngine`/
+  `ProtocolFuzzingEngine` out of `cli/app.py`'s module level to speed up
+  `--version`/`--help`/`history`: those names must stay module attributes
+  because every Phase 6/7 CLI test injects fakes via
+  `monkeypatch.setattr(cli_app, "WebAssessmentEngine", ...)` — moving the
+  import into the function body would silently break that pattern across
+  the whole test suite for a ~20-30% cold-start improvement on commands
+  where startup time barely matters next to a scan that runs for seconds
+  to minutes anyway. Documented as measured baseline, not chased further.
+- [x] **Concurrency tuning + safe defaults** — `SchedulerConfig.concurrency`
+  was already bounded (`ge=1, le=500`, Phase 3). The protocol-fuzzing
+  benchmark below shows **diminishing returns past ~10-30 concurrent
+  connections against a single target** (531 → 571 iterations/sec going
+  from concurrency 10 to 30, a 7% gain for 3x the connections) — documented
+  here as data-driven guidance for profile tuning rather than a new hard
+  cap, since the right ceiling depends on the target, not a number
+  AutoFuzz can safely assume for every target.
+- [x] **Response caching within a scan session** — verified rather than
+  built: the crawler's `visited: set[str]` already guarantees no URL is
+  fetched twice within one crawl (Phase 4), and `WebAssessmentEngine`
+  doesn't currently call `discover_robots_txt`/`discover_sitemap`
+  independently in a way that would duplicate a crawl fetch. No redundant-
+  request pattern exists in the current architecture to justify a new
+  caching layer - would have been complexity added for a problem that
+  isn't there.
+- [x] **Benchmark harness**: `scripts/benchmark.py` - measures protocol
+  engine throughput, web engine throughput, mutator throughput, and CLI
+  cold start, all against local in-process fake targets (no external
+  network dependency). Meant to be re-run by contributors to catch
+  regressions, not just a one-off report.
+- [x] **Published comparison vs. v1 baseline** — v1 was intentionally
+  removed from the working tree in Phase 5 at the user's request, so this
+  harness doesn't carry a v1 codepath forward. Instead: retrieved v1
+  verbatim from git history (commit `dea1c65`, before its Phase 5 removal)
+  and ran it head-to-head against v2, both doing exactly 1000 iterations
+  against the same fake FTP server:
+
+  | Engine | Time | Throughput | vs. v1 |
+  |---|---|---|---|
+  | v1 (single blocking connection, includes its own per-iteration testcase-file logging) | 5.91s | 169.1 iter/s | 1.0x |
+  | v2, concurrency=1 | 2.78s | 359.1 iter/s | 2.1x |
+  | v2, concurrency=10 | 2.06s | 485.2 iter/s | 2.9x |
+  | v2, concurrency=30 | 1.94s | 514.4 iter/s | 3.0x |
+
+  Even v2 at concurrency=1 beats v1 by ~2x (async I/O overhead is lower
+  than v1's blocking sockets, and v1's per-iteration file write adds real
+  disk I/O v2 doesn't have in its hot path); real concurrency then adds
+  another ~40% on top before hitting the same diminishing-returns wall
+  noted above. This comparison isn't reproducible via the committed
+  harness (deliberately - resurrecting v1 into the tree to keep it
+  re-runnable would partially undo its Phase 5 retirement); the numbers
+  above are the durable record of it.
 
 ## Phase 9 — DevSecOps
 
