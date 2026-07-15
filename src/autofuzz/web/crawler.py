@@ -32,13 +32,14 @@ _LINK_ATTRS: tuple[tuple[str, str], ...] = (
 
 @dataclass
 class CrawlResult:
-    """One fetched page: its URL, status, links found on it, and (for HTML) its body."""
+    """One fetched page: its URL, status, headers, links found on it, and (for HTML) its body."""
 
     url: str
     status_code: int | None
     depth: int
     discovered_links: list[str] = field(default_factory=list)
     content_type: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
     html: str | None = None
     error: str | None = None
 
@@ -124,6 +125,7 @@ class Crawler:
                 depth=depth,
                 discovered_links=links,
                 content_type=content_type,
+                headers=dict(response.headers),
                 html=html,
             )
 

@@ -9,7 +9,7 @@ object shared by both engines.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml
 from pydantic import BaseModel, Field, ValidationError
@@ -49,6 +49,19 @@ class ProtocolEngineConfig(BaseModel):
     docker_container_name: str | None = None
 
 
+class PluginConfig(BaseModel):
+    """Plugin enable/disable and per-plugin option overrides for one scan."""
+
+    enabled: list[str] | None = Field(
+        default=None,
+        description=(
+            "If set, only these plugin ids run (allow-list). None means all registered plugins run."
+        ),
+    )
+    disabled: list[str] = Field(default_factory=list)
+    options: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
 class ScanProfile(BaseModel):
     """A named, loadable set of scan parameters for one engine."""
 
@@ -64,6 +77,7 @@ class ScanProfile(BaseModel):
     scheduler: SchedulerConfig = Field(default_factory=SchedulerConfig)
     web: WebEngineConfig = Field(default_factory=WebEngineConfig)
     protocol: ProtocolEngineConfig = Field(default_factory=ProtocolEngineConfig)
+    plugins: PluginConfig = Field(default_factory=PluginConfig)
 
 
 def load_profile(path: str | Path) -> ScanProfile:

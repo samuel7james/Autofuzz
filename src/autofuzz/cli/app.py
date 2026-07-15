@@ -6,21 +6,30 @@ engine to dispatch to (a URL implies ``web``; anything else implies
 ``proto``) by rewriting argv *before* Click/Typer parses it, so normal
 subcommand parsing is never affected.
 
-The engines themselves are stubs until Phase 4 (web) and Phase 3/5 (proto)
-land; this phase only establishes the CLI shape and dispatch behavior.
+``proto`` runs the real Protocol Fuzzing Engine (Phase 3/5). ``web`` is
+still a stub - the Web Assessment Engine's discovery half exists (Phase 4)
+but isn't wired into a runnable, reportable scan until Phase 6's reporting
+engine exists to give it something to produce.
 """
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from importlib.metadata import PackageNotFoundError, version
 
 import typer
 
-from autofuzz.cli.ui import console, print_error
+from autofuzz.cli.ui import console, print_error, print_warning
 from autofuzz.core.config import ScanProfile, load_profile
-from autofuzz.core.errors import ConfigError
+from autofuzz.core.errors import ConfigError, EngineError
 from autofuzz.core.logging import configure_logging, get_logger
+from autofuzz.core.target_controller import (
+    DockerTargetController,
+    NoOpTargetController,
+    TargetController,
+)
+from autofuzz.protocol_fuzzing.engine import ProtocolFuzzingEngine
 
 log = get_logger(__name__)
 
@@ -111,7 +120,7 @@ def web(
     target: str = typer.Argument(..., help="Target URL, e.g. https://target.example"),
     profile: str | None = typer.Option(None, "--profile", "-p", help="Path to a YAML profile."),
 ) -> None:
-    """Run the Web Assessment Engine against TARGET. (Engine lands in Phase 4.)"""
+    """Run the Web Assessment Engine against TARGET. (Runnable scan lands in Phase 6.)"""
     if profile is not None:
         loaded = _load_and_authorize(profile, expected_engine="web")
         console.print(f"[green]Loaded profile:[/green] {loaded.name}")
@@ -119,17 +128,46 @@ def web(
     raise typer.Exit(code=1)
 
 
+def _build_target_controller(loaded: ScanProfile) -> TargetController:
+    if loaded.protocol.target_controller != "docker":
+        return NoOpTargetController()
+    if not loaded.protocol.docker_container_name:
+        print_error("protocol.target_controller is 'docker' but docker_container_name is not set.")
+        raise typer.Exit(code=2)
+    return DockerTargetController(loaded.protocol.docker_container_name)
+
+
 @app.command()
 def proto(
     target: str = typer.Argument(..., help="Target as host:port, e.g. 127.0.0.1:21"),
-    profile: str | None = typer.Option(None, "--profile", "-p", help="Path to a YAML profile."),
+    profile: str = typer.Option(..., "--profile", "-p", help="Path to a YAML profile."),
 ) -> None:
-    """Run the Protocol Fuzzing Engine against TARGET. (Engine lands in Phase 3/5.)"""
-    if profile is not None:
-        loaded = _load_and_authorize(profile, expected_engine="proto")
-        console.print(f"[green]Loaded profile:[/green] {loaded.name}")
-    console.print(f"[yellow]Protocol Fuzzing Engine not implemented yet.[/yellow] Target: {target}")
-    raise typer.Exit(code=1)
+    """Run the Protocol Fuzzing Engine against TARGET."""
+    loaded = _load_and_authorize(profile, expected_engine="proto")
+    console.print(f"[green]Loaded profile:[/green] {loaded.name}")
+
+    expected_target = f"{loaded.protocol.target_host}:{loaded.protocol.target_port}"
+    if target != expected_target:
+        print_warning(
+            f"TARGET argument ({target}) differs from the profile's target "
+            f"({expected_target}); using the profile's target."
+        )
+
+    target_controller = _build_target_controller(loaded)
+    engine = ProtocolFuzzingEngine(loaded.protocol, loaded.scheduler, target_controller)
+
+    try:
+        findings = asyncio.run(engine.run())
+    except EngineError as exc:
+        print_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    console.print(f"Completed {loaded.protocol.iterations} attempts against {expected_target}.")
+    console.print(f"Findings: {len(findings)}")
+    for finding in findings:
+        console.print(f"  [{finding.severity.value.upper()}] {finding.title}")
+
+    raise typer.Exit(code=1 if findings else 0)
 
 
 def cli_main() -> None:

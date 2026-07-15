@@ -34,16 +34,25 @@ docker build -t autofuzz-ftp .
 docker run -d --name autofuzz-ftp-container -p 21:21 -p 30000-30009:30000-30009 autofuzz-ftp
 ```
 
-### 2. Run The Fuzzer
+### 2. Install AutoFuzz
 
 ```bash
-python3 legacy/autofuzz_v1.py
+pip install -e .
 ```
-Execute this command to start the fuzzing process. The script will mutate FTP commands, send them to the server, and track any crashes or restarts that occur. It will also log the results for further analysis.
 
-> **Note:** AutoFuzz v2 is under active development in `src/autofuzz/`. The
-> script above is the original v1 implementation, kept as a working
-> reference and regression baseline while its logic is ported into the new
-> `autofuzz` package (see `PROJECT_PLAN.md` and `TASKS.md`).
+### 3. Run The Fuzzer
+
+```bash
+autofuzz proto 127.0.0.1:21 --profile examples/configs/ftp-lab.yaml
+```
+This mutates FTP commands, sends them to the server, and classifies any
+crashes or unexpected disconnects encountered along the way, printing a
+findings summary when the run completes.
+
+> **Note:** AutoFuzz v2 is under active development in `src/autofuzz/`; see
+> `PROJECT_PLAN.md` and `TASKS.md` for the architecture and current status.
+> The Protocol Fuzzing Engine (used above) is fully implemented; the Web
+> Assessment Engine (`autofuzz web <url>`) is not yet wired up to a
+> runnable scan.
 
 ---

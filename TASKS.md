@@ -94,21 +94,34 @@ approved.
 
 **Not done in this phase (by design, deferred to Phase 5):** the CLI's `autofuzz web <url>` still reports "not implemented yet" — wiring the discovery engine into an actual runnable, reportable scan happens once the plugin/assessment framework and `ScanSession` are connected in Phase 5, not before.
 
-## Phase 5 — Assessment Framework
+## Phase 5 — Assessment Framework (complete, pending user review)
 
-- [ ] `plugins/base.py`: shared `Plugin` + `Finding` contracts (used by both engines)
-- [ ] `core/plugin.py`: plugin registry/loader (discovery via entry points or package scan)
-- [ ] Port v1 mutation corpus into `protocol_fuzzing/mutators/` as discrete, documented, unit-tested mutators
-- [ ] `protocol_fuzzing/fsm.py`: generalized FSM/sequence builder (replaces hardcoded `BASE_SEQUENCE`)
-- [ ] `protocol_fuzzing/adapters/ftp.py`: FTP transport adapter (v1 successor, async)
-- [ ] `protocol_fuzzing/crash_classifier.py`: distinguishes real faults from timeouts/protocol rejections (replaces "any exception = crash")
-- [ ] Built-in web plugins: passive header analysis, metadata/response inspection, protocol-level checks (non-intrusive only, per plan §12)
-- [ ] Plugin configuration (enable/disable, per-plugin options via profile)
-- [ ] Tests for plugin registry + at least one plugin per engine
+- [x] `plugins/base.py`: shared `Plugin` (ABC, `Generic[ContextT]`) + `Finding`/`Severity`/`PluginMetadata` contracts. Plugins are deliberately synchronous, side-effect-free functions of already-collected data (no plugin does its own I/O) - keeps "passive analysis" literal and every plugin trivially unit-testable.
+- [x] `core/plugin.py`: `PluginRegistry` - explicit `register()` (not entry-point/package-scan discovery, which would be speculative machinery with no third-party consumer yet), `enable`/`disable`/`configure()` (allow-list/deny-list), `apply_options()`, and `run_all()` with per-plugin fault isolation (a raising plugin is logged and skipped, never aborts the scan)
+- [x] `core/config.py`: `PluginConfig` (`enabled`/`disabled`/`options`) added to `ScanProfile.plugins`
+- [x] Ported v1's full 18-mutator corpus into `protocol_fuzzing/mutators/strategies.py` as discrete, named, documented, individually unit-tested functions (`ALL_MUTATORS` + `mutate()`); the two mutators embedding shell-metacharacter payloads are documented in-place as inert data sent to the target's own parser, never executed locally
+- [x] `protocol_fuzzing/fsm.py`: `ProtocolFsm`/`FsmState` - generalized sequence builder replacing hardcoded `BASE_SEQUENCE`
+- [x] `protocol_fuzzing/adapters/ftp.py`: async FTP adapter (`send_sequence`) using asyncio streams instead of v1's blocking sockets. **Fixes a v1 bug found while testing this phase:** a clean connection close (empty read, no exception) after sending a command is now treated as a fault - v1's `recv()` returning `b''` on a graceful close logged `"OK"`, silently missing that class of crash.
+- [x] `protocol_fuzzing/crash_classifier.py`: `FaultKind` (NONE/TIMEOUT/REJECTED/CRASH), `FuzzAttempt`, `classify()`, `to_finding()` - replaces v1's "any exception = crash"
+- [x] `protocol_fuzzing/engine.py`: `ProtocolFuzzingEngine` - orchestrates FSM + mutators + adapter + crash classification + `TargetController` recovery through the Phase 3 `WorkerPool`, chunked by `scheduler.concurrency` so target liveness is rechecked between chunks (not before literally every request, which would defeat concurrency)
+- [x] Built-in web plugins (`plugins/builtin/web_headers.py`): `MissingSecurityHeadersPlugin`, `InsecureCookiePlugin`, `ServerDisclosurePlugin` - all passive, operating only on `CrawlResult` data the crawler already collected (added a `headers` field to `CrawlResult` for this)
+- [x] Plugin configuration: `PluginConfig.enabled`/`disabled`/`options`, applied via `PluginRegistry.configure()`/`apply_options()`
+- [x] Tests: plugin base + registry (fault isolation, allow/deny-list, per-plugin options), full mutator corpus, FSM, crash classifier, built-in web plugins, FTP adapter + full engine run against a real local asyncio TCP server (integration, not mocked), CLI wiring with a fake engine double (no real network in CLI unit tests)
+
+**Beyond the original checklist, done because the user asked for full v1→v2 migration in this phase:**
+- [x] `protocol_fuzzing/engine.py` (wasn't itself an explicit checklist line - see above) and CLI wiring: `autofuzz proto <target> --profile <profile>` now runs a **real** fuzzing campaign (previously a stub, matching `web`'s still-stub state). This required adding `--profile` as a required option for `proto` (there's no responsible zero-config default without the `authorized` gate) and resolving `TargetController` from the profile (`docker` → `DockerTargetController`, else `NoOpTargetController`).
+- [x] **`legacy/autofuzz_v1.py` removed.** Every piece of v1's behavior now has a tested v2 equivalent: FSM sequencing → `fsm.py`, all 18 mutations → `mutators/strategies.py`, FTP transport → `adapters/ftp.py`, crash detection → `crash_classifier.py` (now more correct than v1, see above), Docker restart-on-down → `TargetController`/`DockerTargetController` (Phase 3), the run loop itself → `engine.py`, and the CLI entry point → `autofuzz proto`. `readme.md` and `docker/labs/ftp-vsftpd/` (the disposable lab target) are unaffected - only the redundant reference script is gone.
+
+**Verification run this phase** (same `.venv`):
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` — expanded scope to include `autofuzz.plugins` and `autofuzz.protocol_fuzzing` (were missing from the strict list until this phase); 34 source files, no issues
+- `pytest` — 157/157 passing, 97% coverage
+- `python -m build --wheel` — builds cleanly
+- Manual end-to-end smoke test: real local asyncio TCP server + the actual installed `autofuzz proto <host:port> --profile <profile>` command (not mocked) - loaded the profile, ran 4 real fuzzing attempts, correctly classified all 4 as crashes (the fake server intentionally drops oversized payloads), printed results, exited 1 (findings found)
 
 ## Phase 6 — Reporting
 
-- [ ] `reporting/models.py`: `Finding`, `RiskScore`, `ScanReport` dataclasses
+- [ ] `reporting/models.py`: `RiskScore`, `ScanReport` dataclasses (`Finding` already exists in `plugins/base.py` as of Phase 5 - reuse it, don't redefine it here)
 - [ ] `reporting/renderers/html.py` (Jinja2 template: executive summary, findings, evidence, stats, timeline, recommendations)
 - [ ] `reporting/renderers/markdown.py`
 - [ ] `reporting/renderers/json.py`
