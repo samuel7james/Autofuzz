@@ -47,19 +47,3 @@ Execute this command to start the fuzzing process. The script will mutate FTP co
 > `autofuzz` package (see `PROJECT_PLAN.md` and `TASKS.md`).
 
 ---
-
-## 📄 Paper Reference
-
-This repository supports the research paper:
-
-> Samuel James and Annup Kumar. *A Comprehensive Framework for Automated Network Protocol Fuzzing and Security Analysis*. 2025.
-
-### BibTeX:
-
-```bibtex
-@misc{james2025fuzzing,
-  author       = {Samuel James and Annup Kumar},
-  title        = {A Comprehensive Framework for Automated Network Protocol Fuzzing and Security Analysis},
-  year         = 2025,
-  howpublished = {\url{https://github.com/samuel7james/Autofuzz}},
-}
