@@ -6,17 +6,17 @@ engine to dispatch to (a URL implies ``web``; anything else implies
 ``proto``) by rewriting argv *before* Click/Typer parses it, so normal
 subcommand parsing is never affected.
 
-``proto`` runs the real Protocol Fuzzing Engine (Phase 3/5). ``web`` is
-still a stub - the Web Assessment Engine's discovery half exists (Phase 4)
-but isn't wired into a runnable, reportable scan until Phase 6's reporting
-engine exists to give it something to produce.
+Both ``web`` and ``proto`` run their real engines and write a scan report
+(HTML by default; ``--report-format``/``--report-output`` to change that).
 """
 
 from __future__ import annotations
 
 import asyncio
 import sys
+import uuid
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 
 import typer
 
@@ -24,12 +24,17 @@ from autofuzz.cli.ui import console, print_error, print_warning
 from autofuzz.core.config import ScanProfile, load_profile
 from autofuzz.core.errors import ConfigError, EngineError
 from autofuzz.core.logging import configure_logging, get_logger
+from autofuzz.core.plugin import PluginRegistry
 from autofuzz.core.target_controller import (
     DockerTargetController,
     NoOpTargetController,
     TargetController,
 )
+from autofuzz.plugins.base import Finding
 from autofuzz.protocol_fuzzing.engine import ProtocolFuzzingEngine
+from autofuzz.reporting import ReportFormat, ScanReport, default_extension, render_report
+from autofuzz.web.crawler import CrawlResult
+from autofuzz.web.engine import WebAssessmentEngine, default_web_plugin_registry
 
 log = get_logger(__name__)
 
@@ -115,17 +120,68 @@ def _load_and_authorize(profile_path: str, expected_engine: str) -> ScanProfile:
     return profile
 
 
+def _build_report(
+    *, engine: str, target: str, profile_name: str, findings: list[Finding], stats: dict[str, int]
+) -> ScanReport:
+    report = ScanReport.create(
+        scan_id=uuid.uuid4().hex[:12], engine=engine, target=target, profile_name=profile_name
+    )
+    report.findings = findings
+    report.stats = stats
+    report.complete()
+    return report
+
+
+def _print_summary(report: ScanReport) -> None:
+    console.print(f"Findings: {len(report.findings)}  |  Risk score: {report.risk.score}")
+    for finding in report.findings:
+        console.print(f"  [{finding.severity.value.upper()}] {finding.title}")
+
+
+def _write_report_file(report: ScanReport, fmt: ReportFormat, output: str | None) -> Path:
+    default_name = f"autofuzz-report-{report.scan_id}.{default_extension(fmt)}"
+    path = Path(output) if output else Path(default_name)
+    path.write_text(render_report(report, fmt), encoding="utf-8")
+    return path
+
+
+_REPORT_FORMAT_OPTION = typer.Option(
+    ReportFormat.HTML, "--report-format", help="Report output format."
+)
+_REPORT_OUTPUT_OPTION = typer.Option(
+    None,
+    "--report-output",
+    "-o",
+    help="Report file path (default: autofuzz-report-<scan-id>.<ext>).",
+)
+
+
 @app.command()
 def web(
     target: str = typer.Argument(..., help="Target URL, e.g. https://target.example"),
-    profile: str | None = typer.Option(None, "--profile", "-p", help="Path to a YAML profile."),
+    profile: str = typer.Option(..., "--profile", "-p", help="Path to a YAML profile."),
+    report_format: ReportFormat = _REPORT_FORMAT_OPTION,
+    report_output: str | None = _REPORT_OUTPUT_OPTION,
 ) -> None:
-    """Run the Web Assessment Engine against TARGET. (Runnable scan lands in Phase 6.)"""
-    if profile is not None:
-        loaded = _load_and_authorize(profile, expected_engine="web")
-        console.print(f"[green]Loaded profile:[/green] {loaded.name}")
-    console.print(f"[yellow]Web Assessment Engine not implemented yet.[/yellow] Target: {target}")
-    raise typer.Exit(code=1)
+    """Run the Web Assessment Engine against TARGET and write a scan report."""
+    loaded = _load_and_authorize(profile, expected_engine="web")
+    console.print(f"[green]Loaded profile:[/green] {loaded.name}")
+
+    registry: PluginRegistry[CrawlResult] = default_web_plugin_registry()
+    registry.configure(enabled_ids=loaded.plugins.enabled, disabled_ids=loaded.plugins.disabled)
+    registry.apply_options(loaded.plugins.options)
+
+    engine = WebAssessmentEngine(loaded.web, loaded.scheduler, registry)
+    findings, stats = asyncio.run(engine.run(target))
+
+    report = _build_report(
+        engine="web", target=target, profile_name=loaded.name, findings=findings, stats=stats
+    )
+    _print_summary(report)
+    output_path = _write_report_file(report, report_format, report_output)
+    console.print(f"Report written to {output_path}")
+
+    raise typer.Exit(code=1 if findings else 0)
 
 
 def _build_target_controller(loaded: ScanProfile) -> TargetController:
@@ -141,8 +197,10 @@ def _build_target_controller(loaded: ScanProfile) -> TargetController:
 def proto(
     target: str = typer.Argument(..., help="Target as host:port, e.g. 127.0.0.1:21"),
     profile: str = typer.Option(..., "--profile", "-p", help="Path to a YAML profile."),
+    report_format: ReportFormat = _REPORT_FORMAT_OPTION,
+    report_output: str | None = _REPORT_OUTPUT_OPTION,
 ) -> None:
-    """Run the Protocol Fuzzing Engine against TARGET."""
+    """Run the Protocol Fuzzing Engine against TARGET and write a scan report."""
     loaded = _load_and_authorize(profile, expected_engine="proto")
     console.print(f"[green]Loaded profile:[/green] {loaded.name}")
 
@@ -162,10 +220,16 @@ def proto(
         print_error(str(exc))
         raise typer.Exit(code=2) from exc
 
-    console.print(f"Completed {loaded.protocol.iterations} attempts against {expected_target}.")
-    console.print(f"Findings: {len(findings)}")
-    for finding in findings:
-        console.print(f"  [{finding.severity.value.upper()}] {finding.title}")
+    report = _build_report(
+        engine="proto",
+        target=expected_target,
+        profile_name=loaded.name,
+        findings=findings,
+        stats={"iterations": loaded.protocol.iterations},
+    )
+    _print_summary(report)
+    output_path = _write_report_file(report, report_format, report_output)
+    console.print(f"Report written to {output_path}")
 
     raise typer.Exit(code=1 if findings else 0)
 

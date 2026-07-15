@@ -4,66 +4,15 @@ HTTP server (not mocked), exercising the full Phase 4 web engine pipeline.
 
 from __future__ import annotations
 
-import functools
-import http.server
-import threading
-from collections.abc import Iterator
-
-import pytest
-
 from autofuzz.core.config import SchedulerConfig, WebEngineConfig
 from autofuzz.web.crawler import Crawler
 from autofuzz.web.discovery.endpoints import enumerate_endpoints
-from autofuzz.web.discovery.fingerprint import fingerprint_response
+from autofuzz.web.discovery.fingerprint import fingerprint
 from autofuzz.web.discovery.graph import RequestGraph
 from autofuzz.web.discovery.params import discover_params
 from autofuzz.web.discovery.robots import discover_robots_txt
 from autofuzz.web.discovery.sitemap import discover_sitemap
 from autofuzz.web.http_client import HttpClient
-
-
-@pytest.fixture
-def static_site(tmp_path_factory: pytest.TempPathFactory) -> Iterator[str]:
-    site_dir = tmp_path_factory.mktemp("static_site")
-
-    (site_dir / "index.html").write_text(
-        "<html><body>"
-        '<a href="/about.html">About</a>'
-        '<a href="/contact.html?ref=home">Contact</a>'
-        '<form method="POST" action="/submit">'
-        '<input name="email"><textarea name="message"></textarea>'
-        "</form>"
-        "</body></html>",
-        encoding="utf-8",
-    )
-    (site_dir / "about.html").write_text(
-        "<html><body>"
-        '<a href="/index.html">Home</a>'
-        '<a href="https://external.example/">External</a>'
-        "</body></html>",
-        encoding="utf-8",
-    )
-    (site_dir / "contact.html").write_text("<html><body>Contact us</body></html>", encoding="utf-8")
-    (site_dir / "robots.txt").write_text(
-        "User-agent: *\nDisallow: /admin\nSitemap: /sitemap.xml\n", encoding="utf-8"
-    )
-    (site_dir / "sitemap.xml").write_text(
-        '<?xml version="1.0" encoding="UTF-8"?>'
-        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
-        "<url><loc>http://127.0.0.1/index.html</loc></url>"
-        "</urlset>",
-        encoding="utf-8",
-    )
-
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(site_dir))
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    try:
-        yield f"http://127.0.0.1:{server.server_port}"
-    finally:
-        server.shutdown()
-        thread.join(timeout=5)
 
 
 def _configs() -> tuple[WebEngineConfig, SchedulerConfig]:
@@ -148,7 +97,7 @@ async def test_sitemap_discovery(static_site: str) -> None:
     assert any("index.html" in u for u in info.urls)
 
 
-async def test_fingerprint_detects_python_server_header(static_site: str) -> None:
+async def test_fingerprint_runs_cleanly_against_a_real_response(static_site: str) -> None:
     web_config, scheduler_config = _configs()
     async with HttpClient(web_config, scheduler_config) as client:
         response = await client.get(f"{static_site}/index.html")
@@ -157,5 +106,5 @@ async def test_fingerprint_detects_python_server_header(static_site: str) -> Non
     # BaseHTTP-derived Python server; no bundled rule matches that
     # specifically, so this just confirms fingerprinting runs cleanly
     # against a real response without raising.
-    techs = fingerprint_response(response)
+    techs = fingerprint(dict(response.headers), response.text)
     assert isinstance(techs, list)

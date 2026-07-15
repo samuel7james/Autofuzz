@@ -119,16 +119,30 @@ approved.
 - `python -m build --wheel` — builds cleanly
 - Manual end-to-end smoke test: real local asyncio TCP server + the actual installed `autofuzz proto <host:port> --profile <profile>` command (not mocked) - loaded the profile, ran 4 real fuzzing attempts, correctly classified all 4 as crashes (the fake server intentionally drops oversized payloads), printed results, exited 1 (findings found)
 
-## Phase 6 — Reporting
+## Phase 6 — Reporting (mostly complete, one item carried forward — pending user review)
 
-- [ ] `reporting/models.py`: `RiskScore`, `ScanReport` dataclasses (`Finding` already exists in `plugins/base.py` as of Phase 5 - reuse it, don't redefine it here)
-- [ ] `reporting/renderers/html.py` (Jinja2 template: executive summary, findings, evidence, stats, timeline, recommendations)
-- [ ] `reporting/renderers/markdown.py`
-- [ ] `reporting/renderers/json.py`
-- [ ] `reporting/renderers/csv.py`
-- [ ] Streaming result writes during a scan (fixes v1's "lose everything on mid-run crash")
-- [ ] Risk scoring model
-- [ ] Tests for each renderer against a fixture `ScanReport`
+- [x] `reporting/models.py`: `RiskScore` (severity-weighted, explainable score + `max_severity` + `counts_by_severity`) and `ScanReport` (`create`/`complete` lifecycle, `.risk` computed property) - `Finding` reused unchanged from `plugins/base.py` (Phase 5), not redefined here
+- [x] `reporting/renderers/html.py`: Jinja2 template (`reporting/templates/report.html.jinja`) - executive summary, findings-by-severity table, per-finding cards with evidence, scan statistics, recommendations. **Autoescaping is mandatory here, not a default left as-is**: a Finding's evidence/description can contain text sourced directly from the target under test, which for a security tool is inherently untrusted input - explicitly set `autoescape=True` (not relying on filename-based autodetection, which would have silently been `False` for a `.jinja`-suffixed template)
+- [x] `reporting/renderers/markdown.py`
+- [x] `reporting/renderers/json.py` (with an explicit `Enum`-aware fallback for `Finding.metadata`, which is `dict[str, Any]` and can hold values `json.dumps` doesn't natively know)
+- [x] `reporting/renderers/csv.py` (one row per Finding)
+- [x] Risk scoring model (`RiskScore`, see above)
+- [x] Tests for each renderer against fixture `ScanReport`s, including a dedicated XSS-escaping test for the HTML renderer
+
+**Beyond the original checklist, done because it's what actually makes Phase 6 useful — and because the user asked how to run AutoFuzz against their own website:**
+- [x] `web/engine.py`: `WebAssessmentEngine` - crawls, runs the Phase 5 plugin registry against every fetched page, plus technology fingerprinting (turned into INFO-severity Findings). This is what finally makes `autofuzz web <url>` a real, runnable, reportable scan instead of a stub.
+- [x] `discovery/fingerprint.py` refactored: `fingerprint_response(httpx.Response)` → `fingerprint(headers, body)`, decoupling it from httpx so it works directly against a `CrawlResult`'s already-collected data instead of needing a live `httpx.Response` object.
+- [x] CLI: both `web` and `proto` now take `--report-format` (html/markdown/json/csv) and `--report-output`, build a `ScanReport`, print a console summary, and write the rendered report to disk.
+- [x] Plugin configuration (`ScanProfile.plugins`, built in Phase 5) is now actually applied: the CLI configures the web plugin registry's enable/disable/options from the loaded profile before running.
+
+**Not done in this phase (carried forward):** streaming/incremental result writes during a long scan. `ScanReport` is currently built up in memory and only written to disk once, after the engine's `run()` returns — a process kill or crash mid-scan still loses everything, same failure mode v1 had (Phase 3's `ScanSession` persistence exists but isn't wired into the report-writing path yet). The natural place to close this gap is Phase 7, alongside `autofuzz resume`/`autofuzz history`, since both need the same underlying mechanism (persisting `ScanSession`/partial results incrementally, not just at the end).
+
+**Verification run this phase** (same `.venv`):
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` — expanded scope to include `autofuzz.reporting`; 43 source files, no issues
+- `pytest` — 186/186 passing, 97% coverage
+- `python -m build --wheel` — builds cleanly; confirmed the Jinja template is actually included in the wheel (`unzip -l` showed `autofuzz/reporting/templates/report.html.jinja`) rather than silently assuming hatchling would package a non-`.py` data file
+- Manual end-to-end smoke test: real local static HTTP server + the actual installed `autofuzz web <url> --profile <profile>` command (not mocked) - crawled 2 pages, found 10 findings (missing security headers + a real server-version disclosure, since Python's `http.server` reports its version in the `Server` header), wrote a valid HTML report to disk, exited 1
 
 ## Phase 7 — UX & CLI
 

@@ -1,14 +1,17 @@
 """Technology fingerprinting: lightweight, rule-based detection from response
 headers and body content. No external fingerprint database dependency —
 just a small set of well-known header and body signatures.
+
+Operates on plain headers/body rather than an ``httpx.Response`` so it can
+run against anything that looks like a fetched page - a live request or a
+``CrawlResult`` collected earlier - without a dependency on httpx internals.
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass
-
-import httpx
 
 _SERVER_HEADER_RULES: tuple[tuple[re.Pattern[str], str, str], ...] = (
     (re.compile(r"nginx", re.I), "Nginx", "web-server"),
@@ -34,16 +37,24 @@ class Technology:
     evidence: str
 
 
-def fingerprint_response(response: httpx.Response) -> list[Technology]:
-    """Rule-based technology detection from one HTTP response's headers and body."""
+def _get_header(headers: Mapping[str, str], name: str) -> str | None:
+    target = name.lower()
+    for key, value in headers.items():
+        if key.lower() == target:
+            return value
+    return None
+
+
+def fingerprint(headers: Mapping[str, str], body: str = "") -> list[Technology]:
+    """Rule-based technology detection from one response's headers and body."""
     found: list[Technology] = []
 
-    server = response.headers.get("server", "")
+    server = _get_header(headers, "server") or ""
     for pattern, name, category in _SERVER_HEADER_RULES:
         if pattern.search(server):
             found.append(Technology(name=name, category=category, evidence=f"Server: {server}"))
 
-    x_powered_by = response.headers.get("x-powered-by")
+    x_powered_by = _get_header(headers, "x-powered-by")
     if x_powered_by:
         found.append(
             Technology(
@@ -53,23 +64,23 @@ def fingerprint_response(response: httpx.Response) -> list[Technology]:
             )
         )
 
-    if "x-aspnet-version" in response.headers:
+    x_aspnet_version = _get_header(headers, "x-aspnet-version")
+    if x_aspnet_version:
         found.append(
             Technology(
                 name="ASP.NET",
                 category="framework",
-                evidence=f"X-AspNet-Version: {response.headers['x-aspnet-version']}",
+                evidence=f"X-AspNet-Version: {x_aspnet_version}",
             )
         )
 
-    if "x-drupal-cache" in response.headers:
+    if _get_header(headers, "x-drupal-cache") is not None:
         found.append(
             Technology(name="Drupal", category="cms", evidence="X-Drupal-Cache header present")
         )
 
-    content_type = response.headers.get("content-type", "")
-    if "text/html" in content_type:
-        body = response.text
+    content_type = _get_header(headers, "content-type") or ""
+    if "text/html" in content_type and body:
         for pattern, name, category in _BODY_RULES:
             if pattern.search(body):
                 found.append(

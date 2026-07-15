@@ -73,6 +73,7 @@ packages = [
     "autofuzz.web",
     "autofuzz.plugins",
     "autofuzz.protocol_fuzzing",
+    "autofuzz.reporting",
 ]
 
 [tool.pytest.ini_options]
