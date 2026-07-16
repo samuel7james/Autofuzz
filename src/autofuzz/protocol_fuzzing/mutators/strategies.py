@@ -1,8 +1,9 @@
 """Mutation corpus for protocol fuzzing.
 
-Ported from v1's inline lambda list (formerly ``autofuzz.py``, now
-``legacy/autofuzz_v1.py``) into discrete, named, independently testable
-functions. Each mutator is documented with the fault class it targets.
+Ported from v1's inline lambda list (the original, single-file
+``autofuzz.py``, retired once v2 reached feature parity - see
+CHANGELOG.md) into discrete, named, independently testable functions.
+Each mutator is documented with the fault class it targets.
 
 All payloads are literal *data* sent to the fuzzed target's own protocol
 parser - including the two that look like shell commands

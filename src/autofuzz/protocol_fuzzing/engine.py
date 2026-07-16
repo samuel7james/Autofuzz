@@ -13,6 +13,7 @@ real concurrency.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 
 from autofuzz.core.config import ProtocolEngineConfig, SchedulerConfig
 from autofuzz.core.errors import EngineError
@@ -20,16 +21,36 @@ from autofuzz.core.logging import get_logger
 from autofuzz.core.scheduler import WorkerPool
 from autofuzz.core.target_controller import NoOpTargetController, TargetController
 from autofuzz.plugins.base import Finding
-from autofuzz.protocol_fuzzing.adapters.ftp import send_sequence
-from autofuzz.protocol_fuzzing.crash_classifier import classify, to_finding
+from autofuzz.protocol_fuzzing.adapters.ftp import send_sequence as ftp_send_sequence
+from autofuzz.protocol_fuzzing.crash_classifier import FuzzAttempt, classify, to_finding
 from autofuzz.protocol_fuzzing.fsm import ProtocolFsm
 from autofuzz.protocol_fuzzing.mutators.strategies import mutate
 
 log = get_logger(__name__)
 
+SendSequence = Callable[..., Awaitable[FuzzAttempt]]
+"""The transport contract every adapter implements:
+``async def send_sequence(host, port, sequence, *, test_id, timeout) ->
+FuzzAttempt``, never raising - see protocol_fuzzing/adapters/ftp.py for the
+reference implementation and docs/developer-guide.md for how to add one."""
+
+
+@dataclass(frozen=True, slots=True)
+class ProtocolAdapter:
+    """A registered protocol: its default FSM sequence and transport function."""
+
+    default_sequence: list[str]
+    send_sequence: SendSequence
+
+
 _FTP_DEFAULT_SEQUENCE = ["USER vulnftp", "PASS 1234", "PWD", "TYPE A", "LIST", "QUIT"]
 
-_DEFAULT_SEQUENCES: dict[str, list[str]] = {"ftp": _FTP_DEFAULT_SEQUENCE}
+ADAPTERS: dict[str, ProtocolAdapter] = {
+    "ftp": ProtocolAdapter(default_sequence=_FTP_DEFAULT_SEQUENCE, send_sequence=ftp_send_sequence),
+}
+"""Registered protocol adapters, keyed by ``ProtocolEngineConfig.adapter``.
+Add a new protocol by writing a ``send_sequence`` matching the
+``SendSequence`` contract and adding an entry here."""
 
 ProgressCallback = Callable[[int, int, list[Finding]], None]
 """Called after each chunk with (iterations_completed, total_iterations,
@@ -49,13 +70,14 @@ class ProtocolFuzzingEngine:
         target_controller: TargetController | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
-        if protocol_config.adapter not in _DEFAULT_SEQUENCES:
+        if protocol_config.adapter not in ADAPTERS:
             raise EngineError(f"Unsupported protocol adapter: {protocol_config.adapter!r}")
         self._protocol_config = protocol_config
         self._scheduler_config = scheduler_config
         self._target_controller = target_controller or NoOpTargetController()
         self._on_progress = on_progress
-        self._fsm = ProtocolFsm.from_commands(_DEFAULT_SEQUENCES[protocol_config.adapter])
+        self._adapter = ADAPTERS[protocol_config.adapter]
+        self._fsm = ProtocolFsm.from_commands(self._adapter.default_sequence)
 
     async def run(self, start_iteration: int = 0) -> list[Finding]:
         """Run attempts from ``start_iteration`` through ``protocol_config.iterations``.
@@ -95,7 +117,7 @@ class ProtocolFuzzingEngine:
     def _attempt_job(self, test_id: int) -> Callable[[], Awaitable[Finding | None]]:
         async def job() -> Finding | None:
             sequence = [mutate(cmd) for cmd in self._fsm.commands()]
-            attempt = await send_sequence(
+            attempt = await self._adapter.send_sequence(
                 self._protocol_config.target_host,
                 self._protocol_config.target_port,
                 sequence,

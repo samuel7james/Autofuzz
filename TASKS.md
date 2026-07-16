@@ -324,17 +324,30 @@ Lesson applied going forward: verify security tooling against the same scope CI 
 - `python -m build --wheel` — builds cleanly
 - **Actually built and ran the full Docker Compose stack end-to-end** (Docker Desktop's daemon happened to be available this session): built both images, brought up the FTP lab, ran `autofuzz proto` against it through Compose networking, confirmed the report persisted to the host via the bind mount and the scan session persisted across separate `docker compose run` invocations via the named volume (`autofuzz history` correctly listed a prior run). This is what caught issue #4 above - it would not have been found by local unit/integration tests alone, since none of them exercise a real Docker volume mount.
 
-## Phase 11 — Documentation
+## Phase 11 — Documentation (complete — pending user review)
 
-- [ ] `README.md` rewrite (v2 quickstart, both engines, authorized-use notice)
-- [ ] `docs/architecture.md`
-- [ ] `docs/developer-guide.md` (how to add a plugin/mutator/adapter)
-- [ ] `docs/user-guide.md`
-- [ ] `docs/ethics.md` (authorized-use policy)
-- [ ] `CONTRIBUTING.md`
-- [ ] `CHANGELOG.md`
-- [ ] Example configs in `examples/configs/`
-- [ ] Verify docs match implementation (no drift)
+- [x] **Found and fixed a real bug while gathering ground truth for the developer guide, before writing a word of it.** `ProtocolFuzzingEngine._attempt_job` hardcoded a direct import of the FTP adapter's `send_sequence`, regardless of `protocol_config.adapter`. A `_DEFAULT_SEQUENCES`-shaped dict existed and gave the *impression* that per-adapter dispatch worked, but the actual transport call never consulted it - "add a new protocol by registering an adapter" was not actually true. Introduced a `SendSequence` type alias documenting the transport contract, a frozen `ProtocolAdapter` dataclass (`default_sequence` + `send_sequence`), and an `ADAPTERS: dict[str, ProtocolAdapter]` registry; the engine now validates against and dispatches through `ADAPTERS` exclusively. Added `test_run_dispatches_to_the_configured_adapters_send_sequence` in `tests/unit/test_engine.py`, which registers a fake adapter via `monkeypatch.setitem` and asserts its `send_sequence` is actually called - this test fails under the old code, specifically guarding against the bug regressing.
+- [x] `readme.md` rewrite: v2 quickstart (install, run a web scan, run a proto scan, the implicit-engine shorthand, history/resume), both engines documented, a prominent authorized-use notice, Docker Compose usage retained, and links to every new doc.
+- [x] Two real terminal screenshots embedded in the README (`docs/images/autofuzz-web-scan.svg`, `autofuzz-proto-scan.svg`) - not mockups. Generated via `rich.console.Console(record=True, force_terminal=True).save_svg()`, redirecting the CLI's own module-level `console` object and invoking `cli_app.web()`/`cli_app.proto()` directly against a real local static HTTP site and a real fake-crash-inducing FTP server, so the captured output (crawl progress, findings, a HIGH-severity crash finding) is genuine tool output. A third attempted screenshot (`autofuzz --help`) was discarded: Typer's `--help` renders through its own internal `rich_utils` console, not the module-level one that was patched, so the captured SVG lacked any real help text - confirmed by grep before deciding to drop it rather than ship something broken or hand-roll a fragile Typer-internals patch.
+- [x] `docs/architecture.md` - how the two engines and shared core (scheduler, scan session, plugin registry, config) fit together, and why the shared core exists (v2's dual-engine reuse, not just v1 cleanup).
+- [x] `docs/developer-guide.md` - dev setup, the exact checks CI runs (including the "use the real `semgrep/semgrep` container image, not local pip-installed CLI" lesson from Phase 9/10), and worked examples for the three real extension points: adding a web plugin, a protocol mutator, and a protocol adapter (the last one now documenting the just-fixed, actually-working registry).
+- [x] `docs/user-guide.md` - full CLI reference (`web`/`proto`/`history`/`resume`, every option, exit codes) and the complete `ScanProfile` YAML schema with field defaults/bounds pulled directly from `core/config.py`, plus notes on the two schema quirks worth calling out explicitly: `respect_robots_txt` is currently informational only (crawler doesn't enforce it yet), and `target_controller: docker` must never point at infrastructure AutoFuzz didn't provision itself.
+- [x] `docs/ethics.md` - authorized-use policy: what each engine actually does to a target, why `authorized: true` is a speed bump and not authorization itself, why the example lab profiles can safely ship `authorized: true`, scoped target recovery, and an explicit callout of the two mutators with destructive-looking literal payloads (inert data sent to the target's own parser, never executed locally).
+- [x] `CONTRIBUTING.md` - dev setup, the pre-PR checklist, coding guidelines specific to this codebase (plugins side-effect-free, adapters never raise, no bare `except:`), and "docs must match implementation in the same PR."
+- [x] `CHANGELOG.md` - Keep-a-Changelog-style `Unreleased`/v2 entry (Added/Changed/Fixed/Security) plus a short legacy v1.0.0 entry.
+- [x] Reviewed `examples/configs/*.yaml` (`web-default`, `web-thorough`, `ftp-lab`, `ftp-lab-compose`) against the current `ScanProfile` schema - all four are accurate and complete; no changes needed.
+- [x] Verified docs against implementation, not just against each other - read every referenced module (`config.py`, `app.py`, `engine.py`, `scheduler.py`, `plugin.py`, `scan.py`, `crawler.py`, mutators, adapters, reporting) before writing the corresponding doc section, which is what surfaced the adapter-dispatch bug above. Also found and fixed a smaller, pre-existing doc-drift issue while at it: `mutators/strategies.py`'s module docstring referenced `legacy/autofuzz_v1.py`, a path that was fully deleted (not relocated) when v1 was retired in Phase 5 - corrected to not imply a file that no longer exists in the repo.
+- [x] Checked every internal cross-reference link (README → docs, docs → docs, `CONTRIBUTING.md` → docs) including GitHub's heading-to-anchor slug algorithm for headings containing backticks/parens/slashes (e.g. `## Core (\`autofuzz/core/\`)` → `#core-autofuzzcore`) - all resolve correctly.
+
+**Verification run this phase:**
+
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` — 43 source files + `scripts/benchmark.py`, no issues
+- `pytest` (via `coverage run -m pytest`) — 219 passed, 1 skipped (POSIX-only permission test, correctly skipped on this Windows dev environment), 96% coverage
+- `python -m build` — sdist and wheel both build cleanly
+- Manually confirmed every file referenced by a new doc (`docs/images/*.svg`, all `docs/*.md`, `CONTRIBUTING.md`, `CHANGELOG.md`) actually exists at the path referenced
+
+**Not done in this phase (carried forward):** a published GitHub Pages/static site build of the `docs/` tree (Markdown-in-repo is sufficient for now); a `SECURITY.md` as a separate file (the vulnerability-reporting process is documented in `docs/ethics.md` instead, which was judged sufficient at this project's current size); GitHub repo-level secret scanning/push protection (still a user action, not code - carried forward since Phase 9).
 
 ## Phase 12 — Final Engineering Review
 
