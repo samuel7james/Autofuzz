@@ -105,7 +105,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: aquasecurity/trivy-action@0.29.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: fs
           scan-ref: .
@@ -125,10 +125,28 @@ jobs:
       image: semgrep/semgrep
     steps:
       - uses: actions/checkout@v4
-      # Blocking: baseline confirmed clean (0 findings against src/tests/
-      # scripts) before this workflow was added, with the one real hit
-      # (Flask-XSS rule false-positiving on a non-Flask Jinja2 renderer
-      # that already has autoescape=True) suppressed inline with a
-      # justifying comment in reporting/renderers/html.py, not silenced
-      # by turning this step off.
-      - run: semgrep scan --config=auto --error
+      # Blocking. The first verification pass only scanned src/tests/
+      # scripts and missed 25 findings that only show up scanning the
+      # whole repo (.github/workflows/, docker/); this step was fixed to
+      # actually cover them.
+      #
+      # yaml.github-actions.security.github-actions-mutable-action-tag:
+      # recommends pinning `uses:` references to a full 40-char commit SHA
+      # instead of a version tag (`@v4`). That's a real, valid hardening
+      # step - but this repo currently uses version tags, the same
+      # convention GitHub's own docs/starter workflows default to, and a
+      # hand-typed SHA that's even one character wrong breaks CI outright
+      # (confirmed the hard way while investigating this exact finding).
+      # Excluded here rather than suppressed line-by-line across ~24
+      # `uses:` lines; upgrading to verified SHA pins is legitimate future
+      # work, best done with a tool that resolves and checks them
+      # correctly (e.g. Dependabot's pinned-digest updates) rather than by
+      # hand.
+      #
+      # dockerfile.security.missing-user: suppressed at its one call site
+      # (docker/labs/ftp-vsftpd/Dockerfile) with its own inline comment,
+      # not excluded here - that one has a target-specific justification,
+      # not a blanket one.
+      - run: >-
+          semgrep scan --config=auto --error
+          --exclude-rule=yaml.github-actions.security.github-actions-mutable-action-tag.github-actions-mutable-action-tag

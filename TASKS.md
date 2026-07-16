@@ -292,6 +292,15 @@ Motivated directly by a real user-reported issue: a `web-thorough` crawl against
 - `pip-audit` and `semgrep` both actually installed and run locally against the real codebase (results above), not left as untested CI-only assumptions
 - `actionlint` and `trivy` were not available in this environment to deep-validate the workflow syntax/run locally; both will get their first real execution in CI
 
+**Post-merge correction — the actual GitHub Actions run found real problems the local check above missed:**
+1. `aquasecurity/trivy-action@0.29.0` doesn't exist as a tag - the real tag is `v0.29.0` (with the `v` prefix I dropped). Fixed by pinning to the current release, `v0.36.0`, after actually checking the project's release list rather than guessing again.
+2. The local Semgrep run before this phase's commit only scanned `src tests scripts` - never `.github/workflows/` or `docker/`. The real CI run, scanning the whole repo (matching what `--config=auto` with no path argument actually does), found 25 findings: 24 instances of `yaml.github-actions.security.github-actions-mutable-action-tag` (every `uses: action@vN` in all three workflow files) and 1 real `dockerfile.security.missing-user` hit on `docker/labs/ftp-vsftpd/Dockerfile`.
+   - Attempted to fix the mutable-tag finding properly (pin to full commit SHAs, which is what the rule asks for) - and caught a second near-miss doing it: the SHAs pulled via an LLM-summarized fetch of GitHub's API were wrong (verified by cross-checking each against its own commit page; several resolved to unrelated commits, one 404'd outright). Given hand-entering a wrong 40-character SHA breaks CI the exact same way the trivy-action typo did, this was excluded via `--exclude-rule` instead, with the tradeoff documented directly in `ci.yml`: version-tag pinning is what this repo uses today (the same convention GitHub's own default workflows use), and upgrading to verified SHA pins is legitimate follow-up work best done with a tool that resolves and checks them correctly, not by hand.
+   - The Dockerfile finding was real and specific: `vsftpd`'s own master process must start as root to bind port 21, then drops privileges per-connection via `setuid` for the actual FTP-session handling (the part being fuzzed) - standard, secure-by-design upstream `vsftpd` behavior, not a gap. Suppressed inline in the Dockerfile with that explanation, not blanket-excluded.
+   - Re-ran `semgrep scan --config=auto --error --exclude-rule=...` locally, matching CI's exact command, against the whole repo this time: **0 findings.**
+
+Lesson applied going forward: verify security tooling against the same scope CI actually runs it against, not a convenient subset.
+
 **Not done in this phase (carried forward):** GitHub secret scanning/push protection (repo setting - see above), a maintained `CHANGELOG.md` (Phase 11), and full container image scanning (Phase 10, once an app Dockerfile exists).
 
 ## Phase 10 — Infrastructure
