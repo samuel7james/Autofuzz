@@ -63,7 +63,7 @@ def _extract_links(base_url: str, html: str) -> list[str]:
 
 
 CrawlProgressCallback = Callable[[int, int], None]
-"""Called after each depth level with (pages_fetched, max_pages)."""
+"""Called as each page is fetched with (pages_fetched, max_pages)."""
 
 
 class Crawler:
@@ -85,6 +85,13 @@ class Crawler:
         results: list[CrawlResult] = []
         current_level: list[str] = [start_url]
         depth = 0
+        pages_fetched = 0
+
+        def notify_page_fetched() -> None:
+            nonlocal pages_fetched
+            pages_fetched += 1
+            if self._on_progress:
+                self._on_progress(pages_fetched, self._web_config.max_pages)
 
         async with HttpClient(self._web_config, self._scheduler_config) as client:
             while (
@@ -94,7 +101,10 @@ class Crawler:
             ):
                 pool: WorkerPool[CrawlResult] = WorkerPool(self._scheduler_config)
                 jobs = [self._fetch_job(client, url, depth) for url in current_level]
-                batch_results = await pool.run_all(jobs)
+                # Per-page progress, not per-level: a single level can hold
+                # hundreds of URLs, and reporting only once the whole level
+                # finishes made a long level look frozen the entire time.
+                batch_results = await pool.run_all(jobs, on_job_done=notify_page_fetched)
 
                 next_level: list[str] = []
                 for result in batch_results:
@@ -111,9 +121,6 @@ class Crawler:
 
                 current_level = next_level
                 depth += 1
-
-                if self._on_progress:
-                    self._on_progress(len(results), self._web_config.max_pages)
 
         return results[: self._web_config.max_pages]
 

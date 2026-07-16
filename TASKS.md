@@ -261,16 +261,38 @@ fine," nothing was changed; where it found a real problem, it got fixed.
   re-runnable would partially undo its Phase 5 retirement); the numbers
   above are the durable record of it.
 
-## Phase 9 — DevSecOps
+## Phase 9 — DevSecOps (complete except one repo setting only the user can flip — pending user review)
 
-- [ ] `.github/workflows/ci.yml`: ruff check + format check, mypy, pytest+coverage, build
-- [ ] `.github/workflows/codeql.yml`
-- [ ] Semgrep integration
-- [ ] `pip-audit` dependency scanning
-- [ ] Trivy Docker image scanning
-- [ ] Enable GitHub secret scanning + push protection (repo setting, not code)
-- [ ] SBOM generation (CycloneDX via syft) on release
-- [ ] `.github/workflows/release.yml`: tag-triggered build + changelog + SBOM + GitHub Release
+Also included a repo-wide optimization pass (see below the DevSecOps items) since it was requested alongside this phase.
+
+- [x] `.github/workflows/ci.yml`: parallel jobs for `ruff check`/`ruff format --check`, `mypy --strict` (both the package and `scripts/benchmark.py`), a test matrix across Python 3.10-3.13 (matching `requires-python`), a build job gated on the other three, plus a Docker-lab-image build smoke test, `pip-audit`, a Trivy filesystem scan, and Semgrep
+- [x] `.github/workflows/codeql.yml`: push/PR to `main` + a weekly Monday scheduled run, `security-extended` query pack
+- [x] Semgrep integration: **actually installed and run locally against the real codebase** (not just wired into CI blind) - found 2 real findings (both the same rule, `python.flask.security.xss.audit.direct-use-of-jinja2`, flagging `reporting/renderers/html.py`'s direct Jinja2 `Environment` use). Reviewed rather than reflexively suppressed: the rule assumes a Flask app and suggests `render_template()`, which doesn't apply here, but what it's actually checking for - autoescaping - is already explicitly enabled (`autoescape=True`, set deliberately in Phase 6, covered by a dedicated XSS test). Suppressed inline with `# nosemgrep` and a comment explaining why, not by disabling the rule category. Confirmed **0 findings** on the corrected baseline, so the CI step ships **blocking**, not deferred to "non-blocking initially" as originally planned - there was no reason to soften it once a clean run was actually confirmed.
+- [x] `pip-audit` dependency scanning: added to `dev` extras and **run for real** against the current dependency set - 0 known vulnerabilities. Wired into CI as its own job.
+- [x] Trivy scanning: **scoped honestly, not blindly wired to "Trivy Docker image scanning" as originally phrased.** There is no application Docker image yet (that's Phase 10); running Trivy in filesystem-scan mode (`trivy fs .`) covers dependencies and IaC config today, which is real coverage rather than a no-op placeholder. `docker/labs/ftp-vsftpd/` is explicitly excluded from the scan - it's a deliberately vulnerable fuzzing target (old Ubuntu + vsftpd), and flagging it as insecure would just be noise about the exact insecurity it exists to provide. Full container image scanning activates once Phase 10's app image exists. Not runnable locally (no Trivy binary in this environment) - will get its first real run in CI.
+- [ ] **GitHub secret scanning + push protection is a repository setting, not code — only you can enable it** (I don't have access to your repo's GitHub settings). Steps: repo → Settings → Code security and analysis → enable "Secret scanning" and "Push protection." Left unchecked here since it's not something I can verify or do on your behalf.
+- [x] SBOM generation (CycloneDX via Syft, through `anchore/sbom-action` which wraps Syft) — wired into `release.yml`, produced and attached on every tagged release
+- [x] `.github/workflows/release.yml`: tag-triggered (`v*`), re-runs the full verification suite before building (so a broken release can't ship), builds the sdist/wheel, generates the SBOM, and publishes a GitHub Release with `generate_release_notes: true` standing in for a hand-maintained changelog until `CHANGELOG.md` exists (Phase 11). PyPI publishing intentionally excluded, per `PROJECT_PLAN.md`'s original scope call.
+
+### Optimization pass (requested alongside this phase)
+
+Motivated directly by a real user-reported issue: a `web-thorough` crawl against a real site appeared to hang at a fixed progress percentage.
+
+- [x] **Root-caused and fixed the actual visual bug** (this shipped just before this phase, included here for the full picture): httpx logs every HTTP request at INFO level via stdlib `logging`; since it has no handler of its own, those records flooded stdout through AutoFuzz's own root handler and visually collided with Rich's live progress bar redraws, making a still-running crawl look frozen. Fixed in `core/logging.py` by pinning `httpx`/`httpcore` to WARNING regardless of AutoFuzz's own configured level.
+- [x] **Fixed the progress-granularity issue underneath the visual bug.** `Crawler` only reported progress once per BFS depth *level*, not per page - a level with hundreds of URLs (common on a real content site) looked stalled for the entire time it took to fetch all of them. `WorkerPool.run_all()` gained an optional `on_job_done` callback that fires the instant each individual job finishes (success or failure) while still preserving `gather()`'s order-preserving return contract (verified by a dedicated test alongside the existing order-preservation test). `Crawler` now reports one progress tick per fetched page instead of per level.
+- [x] **Caught and fixed the I/O cost the granularity fix would have introduced**: reporting progress 10,000 times for a `max_pages: 10000` crawl would mean 10,000 full `ScanSession.save()` disk writes if left naive. The CLI now updates the (cheap, in-memory) Rich progress bar on every callback but only checkpoints the session to disk every 25 pages, plus always on the final update - bounded I/O instead of O(pages).
+- [x] Considered applying the same per-job granularity to `ProtocolFuzzingEngine` for symmetry, and deliberately didn't: its progress already fires once per concurrency-sized chunk (typically small, a few seconds each) rather than per unbounded-size level, so there's no equivalent reported problem there, and `resume`'s checkpoint correctness depends on `findings_so_far` being accurate at the moment it's captured - changing that granularity for symmetry alone would add real resume-correctness risk for no concrete benefit.
+
+**Verification run this phase:**
+- `ruff check` / `ruff format --check` — clean (`src`, `tests`, `scripts`)
+- `mypy --strict` — 43 package files + `scripts/benchmark.py` checked separately, no issues
+- `pytest` — 212/212 passing, 96% coverage
+- `python -m build --wheel` — builds cleanly
+- All three workflow YAML files parsed successfully with PyYAML (the `on:` key parsing as the boolean `True` in the check output is a well-known PyYAML/YAML-1.1 quirk with bare `on`/`off`, not a bug in the files - GitHub's own parser handles it correctly)
+- `pip-audit` and `semgrep` both actually installed and run locally against the real codebase (results above), not left as untested CI-only assumptions
+- `actionlint` and `trivy` were not available in this environment to deep-validate the workflow syntax/run locally; both will get their first real execution in CI
+
+**Not done in this phase (carried forward):** GitHub secret scanning/push protection (repo setting - see above), a maintained `CHANGELOG.md` (Phase 11), and full container image scanning (Phase 10, once an app Dockerfile exists).
 
 ## Phase 10 — Infrastructure
 

@@ -169,6 +169,19 @@ def _build_target_controller(profile: ScanProfile) -> TargetController:
     return DockerTargetController(profile.protocol.docker_container_name)
 
 
+_SESSION_CHECKPOINT_INTERVAL = 25
+"""Save the ScanSession every this many progress updates, not every one.
+
+Crawl progress now fires per page (see web/crawler.py), which for a
+10,000-page profile means 10,000 callback invocations. Updating the Rich
+progress bar that often is fine (Rich throttles its own redraw rate), but
+serializing and writing the whole session to disk that often would add
+real, needless I/O on top of the scan itself. The final update is always
+saved regardless of the interval, so the checkpoint is never more than
+_SESSION_CHECKPOINT_INTERVAL pages stale.
+"""
+
+
 def _run_web_engine(
     profile: ScanProfile, target: str, session: ScanSession
 ) -> tuple[list[Finding], dict[str, int]]:
@@ -181,8 +194,9 @@ def _run_web_engine(
 
         def on_progress(completed: int, total: int) -> None:
             progress_bar.update(task, completed=completed, total=total)
-            session.progress["pages_crawled"] = completed
-            session.save(_sessions_dir())
+            if completed % _SESSION_CHECKPOINT_INTERVAL == 0 or completed >= total:
+                session.progress["pages_crawled"] = completed
+                session.save(_sessions_dir())
 
         engine = WebAssessmentEngine(profile.web, profile.scheduler, registry, on_progress)
         return asyncio.run(engine.run(target))

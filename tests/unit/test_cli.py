@@ -21,6 +21,7 @@ from typer.testing import CliRunner
 
 import autofuzz.cli.app as cli_app
 from autofuzz.cli.app import _inject_implicit_command, app
+from autofuzz.core.config import ScanProfile
 from autofuzz.plugins.base import Finding, Severity
 
 runner = CliRunner()
@@ -227,6 +228,42 @@ def test_web_report_format_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
 
     assert result.exit_code == 0
     assert '"engine": "web"' in report_path.read_text(encoding="utf-8")
+
+
+def test_run_web_engine_throttles_session_checkpoints(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Crawl progress now fires per page (Phase 8/optimization pass). Saving
+    the whole session on every single callback would be real, needless I/O
+    for a large crawl - it must only checkpoint periodically plus once at
+    the very end, not on every page."""
+    save_calls = 0
+    original_save = cli_app.ScanSession.save
+
+    def counting_save(self: Any, directory: Path) -> Path:
+        nonlocal save_calls
+        save_calls += 1
+        return original_save(self, directory)
+
+    monkeypatch.setattr(cli_app.ScanSession, "save", counting_save)
+
+    class _ProgressSimulatingEngine:
+        def __init__(self, *args: Any) -> None:
+            self._on_progress = args[3]
+
+        async def run(self, start_url: str) -> tuple[list[Finding], dict[str, int]]:
+            for i in range(1, 101):  # simulate a 100-page crawl
+                self._on_progress(i, 100)
+            return [], {"pages_crawled": 100}
+
+    monkeypatch.setattr(cli_app, "WebAssessmentEngine", _ProgressSimulatingEngine)
+
+    profile = ScanProfile(name="throttle-test", engine="web", authorized=True)
+    session = cli_app.ScanSession.create(profile, target="https://x")
+
+    cli_app._run_web_engine(profile, "https://x", session)
+
+    # 100 pages at a 25-page checkpoint interval -> saves at 25/50/75/100,
+    # not once per page.
+    assert save_calls == 4
 
 
 def test_proto_with_missing_profile_file_is_rejected(tmp_path: Path) -> None:

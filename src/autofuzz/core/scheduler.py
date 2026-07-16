@@ -86,8 +86,30 @@ class WorkerPool(Generic[T]):
             await self._rate_limiter.acquire()
             return await self._retry_policy.run(attempt)
 
-    async def run_all(self, jobs: Sequence[Callable[[], Awaitable[T]]]) -> list[T | BaseException]:
+    async def run_all(
+        self,
+        jobs: Sequence[Callable[[], Awaitable[T]]],
+        *,
+        on_job_done: Callable[[], None] | None = None,
+    ) -> list[T | BaseException]:
         """Run all jobs concurrently; each result is either its return value or the
-        exception it raised (after retries), in the same order as ``jobs``."""
-        coros = (self._run_one(job) for job in jobs)
+        exception it raised (after retries), in the same order as ``jobs``.
+
+        If given, ``on_job_done`` fires the moment each individual job
+        finishes (success or failure) - not once for the whole batch - so a
+        caller can report fine-grained progress on a batch that takes a
+        while, without waiting for every job in it to complete first. It
+        does not affect the order-preserving return value: results are
+        still collected via ``gather``, just from wrapped coroutines that
+        each notify on their own completion before it resolves.
+        """
+
+        async def run_and_notify(job: Callable[[], Awaitable[T]]) -> T:
+            try:
+                return await self._run_one(job)
+            finally:
+                if on_job_done:
+                    on_job_done()
+
+        coros = (run_and_notify(job) for job in jobs)
         return list(await asyncio.gather(*coros, return_exceptions=True))

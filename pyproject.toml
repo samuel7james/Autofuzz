@@ -43,6 +43,8 @@ dev = [
     "types-pyyaml>=6.0",
     "types-beautifulsoup4>=4.12",
     "types-defusedxml>=0.7",
+    "build>=1.2",
+    "pip-audit>=2.7",
 ]
 
 [project.urls]

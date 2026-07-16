@@ -43,6 +43,60 @@ async def test_worker_pool_respects_concurrency_limit() -> None:
     assert max_active <= 2
 
 
+async def test_worker_pool_on_job_done_fires_once_per_job() -> None:
+    config = SchedulerConfig(concurrency=3, rate_limit_per_second=1000, max_retries=0)
+    pool: WorkerPool[int] = WorkerPool(config)
+    done_calls = 0
+
+    def on_job_done() -> None:
+        nonlocal done_calls
+        done_calls += 1
+
+    async def job(n: int) -> int:
+        await asyncio.sleep(0)
+        return n
+
+    jobs = [lambda n=i: job(n) for i in range(5)]
+    results = await pool.run_all(jobs, on_job_done=on_job_done)
+
+    assert done_calls == 5
+    assert results == [0, 1, 2, 3, 4]  # order still preserved with the callback wired up
+
+
+async def test_worker_pool_on_job_done_fires_even_when_job_fails() -> None:
+    config = SchedulerConfig(concurrency=2, rate_limit_per_second=1000, max_retries=0)
+    pool: WorkerPool[None] = WorkerPool(config)
+    done_calls = 0
+
+    def on_job_done() -> None:
+        nonlocal done_calls
+        done_calls += 1
+
+    async def failing_job() -> None:
+        raise ValueError("boom")
+
+    async def ok_job() -> None:
+        return None
+
+    results = await pool.run_all([failing_job, ok_job], on_job_done=on_job_done)
+
+    assert done_calls == 2
+    assert isinstance(results[0], ValueError)
+    assert results[1] is None
+
+
+async def test_worker_pool_without_on_job_done_still_works() -> None:
+    config = SchedulerConfig(concurrency=2, rate_limit_per_second=1000, max_retries=0)
+    pool: WorkerPool[int] = WorkerPool(config)
+
+    async def job() -> int:
+        return 1
+
+    results = await pool.run_all([job, job])
+
+    assert results == [1, 1]
+
+
 async def test_worker_pool_returns_exceptions_instead_of_raising() -> None:
     config = SchedulerConfig(concurrency=2, rate_limit_per_second=1000, max_retries=0)
     pool: WorkerPool[None] = WorkerPool(config)

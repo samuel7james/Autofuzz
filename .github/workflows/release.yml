@@ -1,0 +1,60 @@
+name: Release
+
+# Tag-triggered: push a "v*" tag (e.g. v2.0.0) to build, generate an SBOM,
+# and publish a GitHub Release. PyPI publishing is intentionally out of
+# scope unless/until requested (see PROJECT_PLAN.md) - this produces
+# downloadable build artifacts on the GitHub Release, not a package-index
+# upload.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, SBOM, and publish release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Verify before releasing
+        run: |
+          pip install -e ".[dev]"
+          ruff check src tests scripts
+          ruff format --check src tests scripts
+          mypy
+          coverage run -m pytest
+          coverage report -m
+
+      - name: Build distribution
+        run: |
+          pip install build
+          python -m build
+
+      - name: Generate SBOM (CycloneDX, via Syft)
+        uses: anchore/sbom-action@v0
+        with:
+          path: .
+          format: cyclonedx-json
+          output-file: autofuzz-sbom.cyclonedx.json
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          # GitHub's auto-generated notes (commits/PRs since the last tag)
+          # stand in for a changelog until CHANGELOG.md exists (Phase 11).
+          generate_release_notes: true
+          files: |
+            dist/*
+            autofuzz-sbom.cyclonedx.json
