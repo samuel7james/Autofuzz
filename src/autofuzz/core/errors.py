@@ -2,8 +2,8 @@
 
 All errors AutoFuzz raises deliberately derive from ``AutoFuzzError`` so the
 CLI can catch one base type and print an actionable message instead of a raw
-traceback (Phase 7). Do not use bare ``except:`` anywhere in this codebase —
-v1's ``is_ftp_alive()`` did, and it silently swallowed ``KeyboardInterrupt``.
+traceback. Do not use bare ``except:`` anywhere in this codebase — it also
+catches ``KeyboardInterrupt``/``SystemExit`` and silently swallows them.
 """
 
 from __future__ import annotations
@@ -15,10 +15,6 @@ class AutoFuzzError(Exception):
 
 class ConfigError(AutoFuzzError):
     """Configuration or scan profile is missing, malformed, or fails validation."""
-
-
-class AuthorizationError(AutoFuzzError):
-    """A scan was attempted without explicit authorization for the target."""
 
 
 class TargetError(AutoFuzzError):

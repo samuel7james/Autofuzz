@@ -2,9 +2,8 @@
 technology fingerprinting against every fetched page, and returns the
 resulting Findings plus scan statistics.
 
-This is what finally makes `autofuzz web <url>` a real, runnable scan
-instead of a stub - it reuses the Phase 4 crawler/discovery modules and the
-Phase 5 plugin registry/built-in plugins unchanged.
+Ties together the crawler/discovery modules and the plugin registry/
+built-in plugins into one runnable scan.
 """
 
 from __future__ import annotations

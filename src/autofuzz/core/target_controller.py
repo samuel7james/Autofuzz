@@ -1,11 +1,10 @@
 """Target liveness checking and recovery.
 
-Generalizes v1's ``is_ftp_alive()`` / ``restart_docker()`` (which hardcoded
-a single container name and a bare ``docker restart`` call) into a
-pluggable interface. Recovery defaults to a no-op: a scan against a target
-the tool doesn't provision itself (a client's environment, a bare URL) must
-never be "recovered" without an operator opting into a specific, scoped
-controller — see ``PROJECT_PLAN.md`` Security Plan.
+A pluggable interface: any container name, not a hardcoded one, and any
+number of controller implementations. Recovery defaults to a no-op: a scan
+against a target the tool doesn't provision itself (a client's
+environment, a bare URL) must never be "recovered" without an operator
+opting into a specific, scoped controller.
 """
 
 from __future__ import annotations
@@ -40,10 +39,9 @@ class NoOpTargetController:
 class DockerTargetController:
     """Recovers a named Docker container that AutoFuzz provisioned itself.
 
-    Generalizes v1's ``restart_docker()``: any container name (not a
-    hardcoded one), async subprocess calls instead of blocking ones, and a
-    liveness check via ``docker inspect`` instead of assuming the caller
-    already knows.
+    Takes any container name (not a hardcoded one), uses async subprocess
+    calls instead of blocking ones, and checks liveness via
+    ``docker inspect`` instead of assuming the caller already knows.
     """
 
     def __init__(self, container_name: str, *, restart_grace_period: float = 5.0) -> None:

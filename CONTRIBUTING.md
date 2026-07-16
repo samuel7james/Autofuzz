@@ -46,9 +46,9 @@ project's history.
 - **Type checking**: the codebase runs `mypy --strict`. New code should
   be fully typed, no `# type: ignore` without a comment explaining why.
 - **No bare `except:`**: use a specific exception type, or `except
-  Exception` if genuinely broad — see `core/errors.py`'s docstring for
-  why (v1 had a bare `except:` that silently swallowed
-  `KeyboardInterrupt`).
+  Exception` if genuinely broad — a bare `except:` also catches
+  `KeyboardInterrupt`/`SystemExit` and silently swallows them, which is
+  never what you want in a CLI tool. See `core/errors.py`'s docstring.
 - **Plugins are synchronous and side-effect-free**: they analyze data an
   engine already collected, never make their own network requests. See
   [docs/architecture.md](docs/architecture.md#plugins-autofuzzplugins).
@@ -71,8 +71,6 @@ AutoFuzz's own code (not a target you scanned with it), see
 
 ## Project status
 
-AutoFuzz v2 is under active development, following the phased roadmap in
-[PROJECT_PLAN.md](PROJECT_PLAN.md). [TASKS.md](TASKS.md) has a detailed,
-honest write-up of each completed phase, including what was deliberately
-left out and why — read it before assuming a feature discussed in
-`PROJECT_PLAN.md` is already implemented.
+AutoFuzz is under active development. [CHANGELOG.md](CHANGELOG.md) tracks
+notable changes; check open issues and pull requests on GitHub for
+in-progress work.

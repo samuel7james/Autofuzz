@@ -28,8 +28,7 @@ Every scan profile requires an explicit `authorized: true` field
 (`ScanProfile.authorized` in `core/config.py`). The CLI refuses to run
 without it — `_load_and_authorize()` in `cli/app.py` exits with an error
 before any engine starts if this flag is false or missing. This is
-enforced in code, not just documented, per the project's Security Plan
-(`PROJECT_PLAN.md` §10).
+enforced in code, not just documented.
 
 **This flag is not authorization.** It is a speed bump against
 accidentally running a profile you copied from someone else, or against a

@@ -1,9 +1,8 @@
 """Async worker pool: bounded concurrency, rate limiting, and retries.
 
 Shared by both engines so neither reimplements its own throttling/retry
-logic: Phase 4's web crawler and Phase 5's protocol fuzzer both submit jobs
-here instead of opening connections directly, the way v1 did with a bare
-synchronous loop.
+logic: the web crawler and the protocol fuzzer both submit jobs here
+instead of opening connections directly with a bare synchronous loop.
 """
 
 from __future__ import annotations

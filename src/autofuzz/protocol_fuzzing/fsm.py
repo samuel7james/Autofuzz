@@ -1,7 +1,7 @@
 """FSM-based sequence builder for protocol fuzzing.
 
-Generalizes v1's hardcoded ``BASE_SEQUENCE``: a protocol interaction is
-just an ordered list of states, each carrying one command. Adapters
+A protocol interaction is just an ordered list of states, each carrying
+one command, rather than a hardcoded sequence. Adapters
 provide a default sequence for their protocol; profiles can override it
 later without touching adapter code.
 """

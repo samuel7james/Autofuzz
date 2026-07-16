@@ -2,9 +2,8 @@ name: Release
 
 # Tag-triggered: push a "v*" tag (e.g. v2.0.0) to build, generate an SBOM,
 # and publish a GitHub Release. PyPI publishing is intentionally out of
-# scope unless/until requested (see PROJECT_PLAN.md) - this produces
-# downloadable build artifacts on the GitHub Release, not a package-index
-# upload.
+# scope unless/until requested - this produces downloadable build
+# artifacts on the GitHub Release, not a package-index upload.
 
 on:
   push:
@@ -53,7 +52,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           # GitHub's auto-generated notes (commits/PRs since the last tag)
-          # stand in for a changelog until CHANGELOG.md exists (Phase 11).
+          # supplement CHANGELOG.md, which has the curated, human-written
+          # summary of notable changes.
           generate_release_notes: true
           files: |
             dist/*

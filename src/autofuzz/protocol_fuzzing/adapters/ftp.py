@@ -1,11 +1,11 @@
-"""Async FTP transport adapter: v1's successor.
+"""Async FTP transport adapter.
 
 Sends a mutated command sequence over a raw TCP connection using asyncio
-streams instead of v1's blocking sockets, so an attempt can run inside the
-shared ``WorkerPool`` alongside other concurrent fuzzing attempts. Also
-fixes a gap in v1's crash detection: a clean connection close (an empty
+streams, so an attempt can run inside the shared ``WorkerPool`` alongside
+other concurrent fuzzing attempts. A clean connection close (an empty
 read, no exception raised) after sending a command is treated as a fault
-here, whereas v1's ``recv()``-returns-nothing case silently logged "OK".
+here - a graceful peer close is not an exception from ``read()`` either,
+so it would otherwise go unnoticed as a crash.
 """
 
 from __future__ import annotations
@@ -44,9 +44,10 @@ async def send_sequence(
                 data = await asyncio.wait_for(reader.read(_RECV_BUFFER_SIZE), timeout=timeout)
                 if not data:
                     # A clean close (EOF, no exception) after we sent a
-                    # command is itself a fault worth reporting - v1 missed
-                    # this case too, since a graceful peer close is not an
-                    # exception from recv()/read() either.
+                    # command is itself a fault worth reporting - a
+                    # graceful peer close is not an exception from
+                    # recv()/read() either, so it would otherwise pass
+                    # silently as a normal response.
                     raise ConnectionError(
                         f"Connection closed unexpectedly after sending: {command!r}"
                     )

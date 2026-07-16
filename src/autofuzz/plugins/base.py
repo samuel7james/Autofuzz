@@ -1,10 +1,9 @@
 """Shared plugin and finding contracts used by both engines.
 
-``Finding`` is the universal output unit (PROJECT_PLAN.md Section 6): a web
-assessment observation and a protocol fuzzing crash both produce Findings,
-so Phase 6's reporting engine can render both without engine-specific
-special-casing. ``Plugin`` is the base every assessment module - web or
-protocol - implements the same way.
+``Finding`` is the universal output unit: a web assessment observation and
+a protocol fuzzing crash both produce Findings, so the reporting engine can
+render both without engine-specific special-casing. ``Plugin`` is the base
+every assessment module - web or protocol - implements the same way.
 
 Plugins are deliberately synchronous and side-effect-free: they analyze
 data an engine already collected (a fetched page, a fuzzing attempt's

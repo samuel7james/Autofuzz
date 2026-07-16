@@ -1,13 +1,12 @@
 """Protocol Fuzzing Engine: orchestrates an FSM-guided, mutation-driven
-fuzzing run against a live target - v1's successor.
+fuzzing run against a live target.
 
-Ties together the scheduler (Phase 3), the mutation corpus and FSM, the
-transport adapter, and crash classification (this phase) into one runnable
-scan, replacing v1's synchronous ``fuzz()`` loop. Attempts run concurrently
-in chunks sized to ``scheduler.concurrency``; target liveness is checked
-between chunks so a down target gets a chance to recover before the next
-batch, mirroring v1's check-before-each-attempt behavior without defeating
-real concurrency.
+Ties together the scheduler, the mutation corpus and FSM, the transport
+adapter, and crash classification into one runnable scan. Attempts run
+concurrently in chunks sized to ``scheduler.concurrency``; target
+liveness is checked between chunks so a down target gets a chance to
+recover before the next batch, without defeating real concurrency by
+checking before literally every single attempt.
 """
 
 from __future__ import annotations

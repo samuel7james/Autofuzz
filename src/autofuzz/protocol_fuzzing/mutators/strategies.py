@@ -1,16 +1,14 @@
 """Mutation corpus for protocol fuzzing.
 
-Ported from v1's inline lambda list (the original, single-file
-``autofuzz.py``, retired once v2 reached feature parity - see
-CHANGELOG.md) into discrete, named, independently testable functions.
-Each mutator is documented with the fault class it targets.
+Discrete, named, independently testable mutation functions - each
+documented with the fault class it targets.
 
 All payloads are literal *data* sent to the fuzzed target's own protocol
 parser - including the two that look like shell commands
 (``injection_probe_with_shell_metacharacters``,
 ``shell_metacharacter_probe``) - AutoFuzz never executes them locally. They
 exist to probe whether the target unsafely passes fuzzed protocol input
-into a local shell. See PROJECT_PLAN.md Section 10 (Security Plan).
+into a local shell. See docs/ethics.md.
 """
 
 from __future__ import annotations
@@ -162,5 +160,5 @@ ALL_MUTATORS: tuple[Mutator, ...] = (
 
 
 def mutate(command: str, mutators: tuple[Mutator, ...] = ALL_MUTATORS) -> str:
-    """Apply one randomly chosen mutator to ``command`` (v1's ``mutate_command``)."""
+    """Apply one randomly chosen mutator to ``command``."""
     return random.choice(mutators)(command)

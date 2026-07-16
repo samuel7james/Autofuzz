@@ -1,8 +1,7 @@
 """Structured logging setup shared by both engines and the CLI.
 
-Replaces v1's ad-hoc mix of ``print()`` and manual file writes with one
-configuration call that produces both a human-readable console stream and
-(optionally) machine-parseable JSON, from the same log calls.
+One configuration call that produces both a human-readable console stream
+and (optionally) machine-parseable JSON, from the same log calls.
 """
 
 from __future__ import annotations

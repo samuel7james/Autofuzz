@@ -161,13 +161,12 @@ reference.
 
 ## Why a shared core
 
-v1 was a single script with FTP-specific globals (`TARGET_HOST`,
-`BASE_SEQUENCE`, a hardcoded `restart_docker()`) and a synchronous fuzzing
-loop. Every structural decision above exists to let a second engine (web
-assessment) reuse that same machinery instead of duplicating it:
-`ScanProfile` replaces module-level constants with a typed, per-scan
-object; `WorkerPool` replaces the ad hoc synchronous loop with something
-both engines can submit concurrent, rate-limited, retried jobs to;
-`Finding`/`ScanReport` replace protocol-specific print statements with a
-renderable, engine-agnostic report; and `ScanSession` replaces "just
-rerun the script" with real resume/history support.
+Every structural decision above exists to let two very different kinds of
+scan — a protocol fuzzing run and a web crawl — reuse the same machinery
+instead of each engine reimplementing its own version: `ScanProfile` gives
+both a single typed, per-scan configuration object instead of scattered
+parameters; `WorkerPool` gives both concurrency, rate limiting, and
+retries without either engine managing its own connection loop;
+`Finding`/`ScanReport` give both a renderable, engine-agnostic output
+format instead of protocol-specific ad hoc output; and `ScanSession`
+gives both real resume/history support instead of "just start over."

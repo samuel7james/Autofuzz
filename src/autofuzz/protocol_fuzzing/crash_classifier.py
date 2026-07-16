@@ -1,10 +1,10 @@
 """Crash classification for protocol fuzzing attempts.
 
-Replaces v1's "any exception is a CRASH" logic, which flagged ordinary
-timeouts and protocol-level rejections the same way as an actual target
-fault. This module gives fuzzing attempts an explicit taxonomy and turns
-classified crashes into ``Finding``s, so protocol fuzzing output flows
-through the same reporting pipeline as web assessment output.
+Gives fuzzing attempts an explicit taxonomy - rather than treating any
+exception as a crash, which would flag ordinary timeouts and
+protocol-level rejections the same way as an actual target fault - and
+turns classified crashes into ``Finding``s, so protocol fuzzing output
+flows through the same reporting pipeline as web assessment output.
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
 """Scan lifecycle management: a state machine plus JSON persistence for resume.
 
 Engine-agnostic: the same ``ScanSession`` tracks a long protocol fuzzing run
-or a large web crawl, so ``autofuzz resume <scan-id>`` (Phase 7) works
-identically for both.
+or a large web crawl, so ``autofuzz resume <scan-id>`` works identically
+for both.
 """
 
 from __future__ import annotations

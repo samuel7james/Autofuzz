@@ -160,8 +160,9 @@ AutoFuzz reads (all optional, all have working defaults).
 - [docs/ethics.md](docs/ethics.md) — authorized-use policy
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup and workflow
 - [CHANGELOG.md](CHANGELOG.md) — release history
-- [PROJECT_PLAN.md](PROJECT_PLAN.md) / [TASKS.md](TASKS.md) — the v2
-  roadmap and detailed, phase-by-phase build log
+- [examples/ci/scheduled-web-scan.yml](examples/ci/scheduled-web-scan.yml) —
+  a template for running an authorized, scheduled web assessment from your
+  own GitHub Actions workflow
 
 ---
 

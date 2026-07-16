@@ -111,10 +111,23 @@ jobs:
           scan-ref: .
           # docker/labs/ is a deliberately vulnerable fuzzing target (old
           # Ubuntu + vsftpd) - scanning it for vulnerabilities would just
-          # flag the exact insecurity it exists to provide. There is no
-          # app image to scan yet (that lands in Phase 10); this filesystem
-          # scan covers dependencies and IaC config in the meantime.
+          # flag the exact insecurity it exists to provide. The app image
+          # itself is covered separately by the trivy-image job below; this
+          # filesystem scan covers dependencies and IaC config.
           skip-dirs: docker/labs
+          severity: CRITICAL,HIGH
+          exit-code: "0"
+
+  trivy-image:
+    name: Trivy image scan (AutoFuzz app image)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t autofuzz:ci -f docker/Dockerfile .
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: autofuzz:ci
           severity: CRITICAL,HIGH
           exit-code: "0"
 

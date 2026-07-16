@@ -163,7 +163,7 @@ against `docker/labs/ftp-vsftpd/`.
 
 ## Project layout reference
 
-```
+```text
 src/autofuzz/
   core/               shared scheduler, config, scan session, plugin registry, errors, logging
   protocol_fuzzing/    FSM, mutators, adapters, crash classifier, engine
@@ -179,5 +179,5 @@ docker/
   docker-compose.yml     AutoFuzz + disposable FTP lab
   labs/ftp-vsftpd/       the intentionally vulnerable fuzzing target
 examples/configs/        sample scan profiles referenced in the README
-scripts/benchmark.py      performance benchmarking harness (Phase 8)
+scripts/benchmark.py      performance benchmarking harness
 ```

@@ -1,7 +1,7 @@
 """Report data models: RiskScore and ScanReport.
 
-``Finding`` already lives in ``plugins/base.py`` (Phase 5) as the universal
-output unit both engines produce. This module adds the container/summary
+``Finding`` already lives in ``plugins/base.py`` as the universal output
+unit both engines produce. This module adds the container/summary
 types that turn a list of Findings into something renderable: an aggregate
 risk score and a full scan report with metadata, timing, and statistics.
 """

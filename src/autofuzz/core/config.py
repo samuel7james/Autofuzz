@@ -1,9 +1,8 @@
 """Configuration models and scan-profile loading.
 
 A ``ScanProfile`` is a named, validated, YAML-loadable set of parameters for
-one scan. It replaces v1's module-level constants (``TARGET_HOST``,
-``TARGET_PORT``, ``BASE_SEQUENCE``, ...) with a single, typed, testable
-object shared by both engines.
+one scan: a single, typed, testable object shared by both engines instead
+of scattered per-target constants.
 """
 
 from __future__ import annotations
@@ -29,7 +28,7 @@ class SchedulerConfig(BaseModel):
 
 
 class WebEngineConfig(BaseModel):
-    """Parameters specific to the Web Assessment Engine (implemented in Phase 4)."""
+    """Parameters specific to the Web Assessment Engine."""
 
     max_crawl_depth: int = Field(default=3, ge=0, le=20)
     max_pages: int = Field(default=500, ge=1)
@@ -39,7 +38,7 @@ class WebEngineConfig(BaseModel):
 
 
 class ProtocolEngineConfig(BaseModel):
-    """Parameters specific to the Protocol Fuzzing Engine (implemented in Phase 3/5)."""
+    """Parameters specific to the Protocol Fuzzing Engine."""
 
     adapter: str = "ftp"
     target_host: str = "127.0.0.1"

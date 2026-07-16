@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""AutoFuzz v2 performance benchmark harness.
+"""AutoFuzz performance benchmark harness.
 
 Measures throughput of both engines and the mutator corpus against local,
 in-process fake targets (no external network dependency, no fixed hardware
@@ -11,11 +11,6 @@ This is a developer tool, not part of the installed package - it imports
 autofuzz from an editable/dev install and is meant to be run from a repo
 checkout to catch performance regressions across changes, not shipped to
 end users.
-
-See TASKS.md's Phase 8 section for a one-time, results-documented
-comparison against v1 (which this harness does not reproduce - v1 was
-intentionally retired from the working tree in Phase 5; re-running that
-comparison requires checking it out from git history, as documented there).
 """
 
 from __future__ import annotations

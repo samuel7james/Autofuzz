@@ -2,9 +2,8 @@
 
 Every plugin here only reads data the crawler already collected on a
 ``CrawlResult`` (status, headers, body) - none of them make their own
-requests. Non-intrusive, configurable, suitable for authorized assessment
-per PROJECT_PLAN.md's Assessment Framework scope (passive analysis,
-metadata inspection - no active exploitation).
+requests. Non-intrusive, configurable, suitable for authorized assessment:
+passive analysis and metadata inspection only, no active exploitation.
 """
 
 from __future__ import annotations
