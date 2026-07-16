@@ -1,0 +1,52 @@
+# Example deployment configuration - NOT part of AutoFuzz's own CI.
+#
+# A template for running AutoFuzz as a scheduled web assessment against
+# YOUR OWN staging/authorized environment from YOUR OWN repository. Copy
+# this into your project's .github/workflows/ and adjust the target,
+# schedule, and profile to fit.
+#
+# Prerequisites:
+#   - A profile committed to your repo (or generated in a prior step) with
+#     `authorized: true` - only ever point this at a target you have
+#     explicit, documented authorization to test.
+#   - The target actually reachable from a GitHub-hosted runner (a public
+#     staging URL, or a self-hosted runner with network access to an
+#     internal one).
+
+name: Scheduled AutoFuzz Web Scan
+
+on:
+  schedule:
+    # Every Monday 05:00 UTC - adjust to taste.
+    - cron: "0 5 * * 1"
+  workflow_dispatch: {} # allows manually triggering a run from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install AutoFuzz
+        run: pip install autofuzz # or `pip install .` / `pip install git+...` if not yet on PyPI
+
+      - name: Run authorized web assessment
+        run: |
+          autofuzz web https://staging.example.com \
+            --profile ./security/autofuzz-profile.yaml \
+            --report-format html \
+            --report-output autofuzz-report.html
+
+      - name: Upload report
+        if: always() # keep the report even when findings make the scan step exit non-zero
+        uses: actions/upload-artifact@v4
+        with:
+          name: autofuzz-report
+          path: autofuzz-report.html

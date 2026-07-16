@@ -1,0 +1,33 @@
+# AutoFuzz scan profile — Protocol Fuzzing Engine, FTP lab target, for use
+# via docker/docker-compose.yml specifically (see that file's usage
+# comment). Two differences from examples/configs/ftp-lab.yaml:
+#
+#   - target_host is the Compose service name (`ftp-lab`), not 127.0.0.1 -
+#     from inside the `autofuzz` container, the lab lives at that
+#     Docker-network hostname, not localhost.
+#   - target_controller is `none`, not `docker`: Compose's own `restart:
+#     unless-stopped` policy on the ftp-lab service handles recovery, and
+#     the autofuzz container deliberately has no Docker-socket access to
+#     do it itself (see docker-compose.yml for why).
+#
+# `authorized: true` is safe to ship here for the same reason as
+# ftp-lab.yaml: this only ever targets a local, disposable container
+# AutoFuzz's own Compose file provisions - never a stand-in for
+# authorizing any other target.
+name: ftp-lab-compose
+engine: proto
+authorized: true
+
+scheduler:
+  concurrency: 4
+  rate_limit_per_second: 20.0
+  max_retries: 1
+  retry_backoff_seconds: 0.5
+  request_timeout_seconds: 8.0
+
+protocol:
+  adapter: ftp
+  target_host: ftp-lab
+  target_port: 21
+  iterations: 3000
+  target_controller: none

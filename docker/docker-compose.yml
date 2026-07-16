@@ -1,0 +1,51 @@
+# Local development / lab environment for AutoFuzz: the disposable FTP
+# fuzzing target plus an AutoFuzz container ready to scan it.
+#
+# This is a dev/lab convenience, not a deployment template - `autofuzz` is
+# a CLI, not a long-running service, so it's meant to be invoked with
+# `docker compose run`, not left running via `docker compose up`.
+#
+# Usage:
+#   cd docker
+#   docker compose up -d ftp-lab
+#   docker compose run --rm autofuzz proto ftp-lab:21 \
+#     --profile /home/autofuzz/configs/ftp-lab-compose.yaml \
+#     -o /home/autofuzz/reports/report.html
+#   docker compose down
+#
+# Target recovery for the FTP lab is handled by Docker Compose's own
+# `restart` policy below, not by AutoFuzz's DockerTargetController - the
+# autofuzz container intentionally has no access to the host's Docker
+# socket (that would mean giving it effectively root-equivalent host
+# access just to let it call `docker restart` on a sibling container,
+# which Compose already does natively). Use
+# examples/configs/ftp-lab-compose.yaml (target_controller: none) rather
+# than examples/configs/ftp-lab.yaml (target_controller: docker) when
+# running through this compose file.
+
+services:
+  ftp-lab:
+    build:
+      context: ./labs/ftp-vsftpd
+    container_name: autofuzz-ftp-container
+    restart: unless-stopped
+    ports:
+      - "21:21"
+      - "30000-30009:30000-30009"
+
+  autofuzz:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    depends_on:
+      - ftp-lab
+    volumes:
+      - ../examples/configs:/home/autofuzz/configs:ro
+      - autofuzz-data:/home/autofuzz/.autofuzz
+      - ./reports:/home/autofuzz/reports
+    working_dir: /home/autofuzz/reports
+    entrypoint: ["autofuzz"]
+    command: ["--help"]
+
+volumes:
+  autofuzz-data:

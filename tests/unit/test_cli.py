@@ -49,6 +49,48 @@ def test_help_lists_subcommands() -> None:
     assert "resume" in result.stdout
 
 
+def test_autofuzz_log_level_env_var_sets_default_log_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AUTOFUZZ_LOG_LEVEL/AUTOFUZZ_LOG_JSON were declared on AutoFuzzSettings
+    but never actually read anywhere (Phase 10 finding) - confirm main()
+    now wires them into configure_logging()."""
+    captured: dict[str, object] = {}
+
+    def fake_configure_logging(level: str = "INFO", *, json_output: bool = False) -> None:
+        captured["level"] = level
+        captured["json_output"] = json_output
+
+    # --help short-circuits before the callback body runs (Click handles it
+    # specially), so it can't be used to exercise main()'s logic - "history"
+    # is a lightweight real subcommand that does run the callback first.
+    monkeypatch.setattr(cli_app, "configure_logging", fake_configure_logging)
+    monkeypatch.setenv("AUTOFUZZ_LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("AUTOFUZZ_LOG_JSON", "true")
+
+    result = runner.invoke(app, ["history"])
+
+    assert result.exit_code == 0
+    assert captured == {"level": "WARNING", "json_output": True}
+
+
+def test_verbose_flag_overrides_autofuzz_log_level_env_var(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_configure_logging(level: str = "INFO", *, json_output: bool = False) -> None:
+        captured["level"] = level
+
+    monkeypatch.setattr(cli_app, "configure_logging", fake_configure_logging)
+    monkeypatch.setenv("AUTOFUZZ_LOG_LEVEL", "WARNING")
+
+    result = runner.invoke(app, ["-v", "history"])
+
+    assert result.exit_code == 0
+    assert captured["level"] == "DEBUG"
+
+
 def test_web_requires_profile() -> None:
     result = runner.invoke(app, ["web", "https://target.example"])
     assert result.exit_code != 0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -113,3 +114,15 @@ def test_start_resumes_a_failed_session() -> None:
     session.start()  # must not raise
 
     assert session.state == ScanState.RUNNING
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits don't apply on Windows")
+def test_save_restricts_file_and_directory_to_owner(tmp_path: Path) -> None:
+    # Scan data can include evidence scraped from a target - it has no
+    # business being world-readable by default on a shared system.
+    session = ScanSession.create(_profile())
+
+    path = session.save(tmp_path)
+
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert (tmp_path.stat().st_mode & 0o777) == 0o700

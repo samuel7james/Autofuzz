@@ -49,10 +49,30 @@ This mutates FTP commands, sends them to the server, and classifies any
 crashes or unexpected disconnects encountered along the way, printing a
 findings summary when the run completes.
 
+AutoFuzz also has a Web Assessment Engine for authorized HTTP(S) targets:
+
+```bash
+autofuzz web https://target.example --profile examples/configs/web-default.yaml
+```
+
 > **Note:** AutoFuzz v2 is under active development in `src/autofuzz/`; see
 > `PROJECT_PLAN.md` and `TASKS.md` for the architecture and current status.
-> The Protocol Fuzzing Engine (used above) is fully implemented; the Web
-> Assessment Engine (`autofuzz web <url>`) is not yet wired up to a
-> runnable scan.
+
+### Alternative: Docker Compose
+
+To run the FTP lab and AutoFuzz itself in containers instead of installing
+locally:
+
+```bash
+cd docker
+docker compose up -d ftp-lab
+docker compose run --rm autofuzz proto ftp-lab:21 \
+  --profile /home/autofuzz/configs/ftp-lab-compose.yaml \
+  -o /home/autofuzz/reports/report.html
+docker compose down
+```
+
+See `docker/docker-compose.yml` for the full setup, and `.env.example` for
+the environment variables AutoFuzz reads (all optional).
 
 ---

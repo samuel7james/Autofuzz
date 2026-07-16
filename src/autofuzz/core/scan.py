@@ -7,7 +7,9 @@ identically for both.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import uuid
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -104,10 +106,21 @@ class ScanSession:
         )
 
     def save(self, directory: Path) -> Path:
-        """Persist this session as ``<directory>/<id>.json``."""
+        """Persist this session as ``<directory>/<id>.json``.
+
+        Restricted to the owner only (chmod 700/600 on POSIX - a no-op,
+        not an error, on platforms without that permission model): scan
+        data can include evidence scraped from a target (response headers,
+        form field values, ...), which has no business being
+        world-readable by default on a shared system.
+        """
         directory.mkdir(parents=True, exist_ok=True)
+        with contextlib.suppress(OSError):
+            os.chmod(directory, 0o700)
         path = directory / f"{self.id}.json"
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+        with contextlib.suppress(OSError):
+            os.chmod(path, 0o600)
         return path
 
     @classmethod

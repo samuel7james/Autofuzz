@@ -94,8 +94,15 @@ def main(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-essential output."),
 ) -> None:
     """AutoFuzz: authorized-use security assessment framework."""
-    level = "ERROR" if quiet else ("DEBUG" if verbose >= 1 else "INFO")
-    configure_logging(level=level)
+    settings = AutoFuzzSettings()
+    if quiet:
+        level = "ERROR"
+    elif verbose >= 1:
+        level = "DEBUG"
+    else:
+        # AUTOFUZZ_LOG_LEVEL sets the default; -v/-q above always override it.
+        level = settings.log_level
+    configure_logging(level=level, json_output=settings.log_json)
 
 
 def _sessions_dir() -> Path:

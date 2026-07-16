@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from autofuzz.core.errors import ConfigError
@@ -110,3 +110,12 @@ class AutoFuzzSettings(BaseSettings):
     config_dir: Path = Path.home() / ".autofuzz"
     log_level: str = "INFO"
     log_json: bool = False
+
+    @field_validator("config_dir")
+    @classmethod
+    def _expand_user(cls, value: Path) -> Path:
+        # pydantic's Path type does not expand a leading `~` on its own -
+        # without this, AUTOFUZZ_CONFIG_DIR=~/.autofuzz would silently
+        # create a literal directory named "~" under the current working
+        # directory instead of resolving to the user's home directory.
+        return value.expanduser()

@@ -29,6 +29,8 @@ mutated_inputs/
 fuzz_log.txt
 fuzz_results.csv
 restart_log.txt
+autofuzz-report-*.*
+docker/reports/
 
 # Editors
 .vscode/

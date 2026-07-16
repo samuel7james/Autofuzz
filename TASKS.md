@@ -303,13 +303,26 @@ Lesson applied going forward: verify security tooling against the same scope CI 
 
 **Not done in this phase (carried forward):** GitHub secret scanning/push protection (repo setting - see above), a maintained `CHANGELOG.md` (Phase 11), and full container image scanning (Phase 10, once an app Dockerfile exists).
 
-## Phase 10 — Infrastructure
+## Phase 10 — Infrastructure (complete — pending user review)
 
-- [ ] `docker/Dockerfile` (multi-stage, app image)
-- [ ] `docker/docker-compose.yml` (app + `labs/ftp-vsftpd`, easy local dev)
-- [ ] Environment/config management docs (`.env.example`)
-- [ ] Example deployment configuration
-- [ ] Secure-by-default configuration handling review
+- [x] `docker/Dockerfile`: multi-stage (build a wheel in a full `python:3.12-slim` image, install only the wheel into a fresh slim runtime image - no build toolchain or source tree in the final image). Runs as a non-root `autofuzz` user (uid 1000), not root - unlike the FTP lab image, there's no legitimate reason for this one to run as root, so no exception was warranted here.
+- [x] `docker/docker-compose.yml`: brings up the FTP lab plus an `autofuzz` service ready to scan it. `autofuzz` is a CLI, not a daemon, so this is designed for `docker compose run`, not `up`. Deliberately does **not** give the `autofuzz` container access to the host's Docker socket - recovering a crashed FTP lab is handled by Compose's own `restart: unless-stopped` on that service instead of AutoFuzz's `DockerTargetController` reaching out to a sibling container, which would otherwise mean granting the app image effectively root-equivalent host access just to reimplement what Compose already does natively.
+- [x] `examples/configs/ftp-lab-compose.yaml`: a variant of `ftp-lab.yaml` for the Compose workflow specifically (`target_host: ftp-lab` instead of `127.0.0.1`, `target_controller: none` instead of `docker`, per the above).
+- [x] `.env.example`: documents `AUTOFUZZ_CONFIG_DIR`/`AUTOFUZZ_LOG_LEVEL`/`AUTOFUZZ_LOG_JSON` - all three actually wired up and read (see the review below; two of them weren't, before this phase).
+- [x] Example deployment configuration: `examples/ci/scheduled-web-scan.yml`, a template (not part of this repo's own CI) for running an authorized scheduled web scan from a user's own project, with clear comments on what needs adjusting before it's runnable as-is.
+- [x] Secure-by-default configuration handling review - found and fixed four real issues along the way, not just a paper audit:
+  1. **`AUTOFUZZ_LOG_LEVEL`/`AUTOFUZZ_LOG_JSON` were declared on `AutoFuzzSettings` since Phase 2 but never actually read anywhere** - `configure_logging()` was always called with a level computed purely from `-v`/`-q`. Wired both into `main()`: the env vars now set the default, CLI flags still override.
+  2. **`AUTOFUZZ_CONFIG_DIR=~/...` silently didn't work** - pydantic's `Path` field type doesn't expand a leading `~` on its own, so this would have created a literal directory named `~` instead of resolving to the home directory. Added a `field_validator` calling `.expanduser()`. Caught while writing `.env.example`, before documenting a value that wouldn't have actually worked.
+  3. **Scan session files were world-readable by default** - `ScanSession.save()` relied on the OS umask (typically 644/755 on Linux) for data that can include evidence scraped from a target (response headers, form field values). Now `chmod`s the session directory to 700 and each session file to 600 (best-effort - a no-op, not an error, on platforms without that permission model).
+  4. **Found only by actually running the Docker Compose setup, not by reasoning about it**: a fresh named volume mounted over a path that doesn't already exist in the image is created root-owned by default. Since the container runs as non-root, the very first `ScanSession.save()` (with its new 700/600 chmod from fix #3) failed with a real `PermissionError` the first time the Compose workflow was actually exercised end-to-end. Fixed by pre-creating and `chown`-ing `~/.autofuzz` and `~/reports` in the Dockerfile before the `USER` switch, so a fresh volume/bind-mount inherits the right ownership.
+- [x] `readme.md`: added a Docker Compose usage section, and fixed a note that had gone stale after Phase 6 (it still said the Web Assessment Engine wasn't wired up to a runnable scan - it has been since Phase 6).
+
+**Verification run this phase:**
+- `ruff check` / `ruff format --check` — clean
+- `mypy --strict` — 43 files, no issues
+- `pytest` — 218/219 passing, 1 skipped (the session-file-permission test is POSIX-only, correctly skips on this Windows dev environment - it isn't a gap, since it will run for real in CI's Linux runners), 96% coverage
+- `python -m build --wheel` — builds cleanly
+- **Actually built and ran the full Docker Compose stack end-to-end** (Docker Desktop's daemon happened to be available this session): built both images, brought up the FTP lab, ran `autofuzz proto` against it through Compose networking, confirmed the report persisted to the host via the bind mount and the scan session persisted across separate `docker compose run` invocations via the named volume (`autofuzz history` correctly listed a prior run). This is what caught issue #4 above - it would not have been found by local unit/integration tests alone, since none of them exercise a real Docker volume mount.
 
 ## Phase 11 — Documentation
 
