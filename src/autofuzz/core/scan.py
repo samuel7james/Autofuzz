@@ -116,7 +116,12 @@ class ScanSession:
         """
         directory.mkdir(parents=True, exist_ok=True)
         with contextlib.suppress(OSError):
-            os.chmod(directory, 0o700)
+            # 0o700 (owner rwx, nothing for group/other) is the intended,
+            # more-restrictive-than-default mode here, not a mistake: this
+            # directory holds scan data that can include evidence scraped
+            # from a target. The rule's suggested "fix" of 0o644 would make
+            # it world-readable, the opposite of the point of this call.
+            os.chmod(directory, 0o700)  # nosemgrep
         path = directory / f"{self.id}.json"
         path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
         with contextlib.suppress(OSError):
